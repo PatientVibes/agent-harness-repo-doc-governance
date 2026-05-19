@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (PR #2)
+- Vendored skill body + 3 references (`phases.md`, `decisions.md`, `templates.md`) from
+  `agent-skills/plugins/repo-documentation-governance/` @
+  `2d4e2aac7677914bcd417cb752f1a7e9a4e72194` into `src/repo_doc_governance/prompts/`.
+  All four files carry a `<!-- DO NOT EDIT — vendored from … @ <SHA>. Edit upstream + re-vendor. -->`
+  header on line 1.
+- `Makefile` with `re-vendor` target — clones agent-skills at a configurable ref
+  (default master) and rewrites the four vendored files with a fresh SHA in the
+  header. Guards against the "someone hand-edited a vendored file after vendoring"
+  anti-pattern by comparing each destination's body (line 3 onward, skipping the
+  DO-NOT-EDIT header) against the upstream content at the SHA recorded in the
+  header. If any file has drifted, the target lists the drifted files and stops;
+  bypass with `FORCE=1` if the local edits are intentional (and documented in
+  CHANGELOG). Catches a class of silent overwrite that a header-presence check
+  alone would miss — that fix lands in this PR per a codex review finding.
+- Orchestrator skeleton: `Phase` IntEnum (1–9), `Task` str-Enum (six task types
+  per SKILL.md triage table), `TASK_TO_PHASES` routing table, `RunState`
+  Pydantic model with phase-output fields stubbed, sequential `run()` with
+  per-phase exception isolation (defensive — one phase failing does not abort
+  the rest), `summary()` for `--json` CLI output.
+- Phase functions are stubs that `raise NotImplementedError` with a pointer
+  to the build sequence in the design spec. Real implementations land in PR #3–#5.
+- Tests (`tests/test_orchestrator.py`, 14 cases) covering task→phases routing,
+  RunState defaults, run() exception-handling, summary() shape, and vendored
+  prompt headers.
+
 ## [0.1.0-rc] — 2026-05-19
 
 ### Added

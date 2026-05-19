@@ -61,13 +61,13 @@ Three PatientVibes tools are pulled from GitHub via `[tool.uv.sources]` in `pypr
 
 | Component | Implementation |
 |---|---|
-| Orchestration | *(PR #2)* Plain Python sequential pipeline with Pydantic `RunState`; phase-skip list-filter from `task` parameter. No custom LangGraph StateGraph — matches `agent-harness-card-extractor` precedent. |
+| Orchestration | Plain Python sequential pipeline (`src/repo_doc_governance/orchestrator.py`) with Pydantic `RunState`; phase-skip list-filter from `task` parameter (`Task` enum → `TASK_TO_PHASES`). Per-phase exception isolation — one phase failing does NOT abort the rest. No custom LangGraph StateGraph; matches `agent-harness-card-extractor` precedent. |
 | Tools | *(PR #3+)* Git ops (`git ls-files`, `git status`, `git blame`), file ops (Read / Write / Edit / Glob / Grep), classification rules, PR creation via `gh` |
-| Memory | *(PR #3)* Per-run `RunState` Pydantic model carrying inventory, findings, classifications, PR body draft. No cross-run memory — each repo run is independent. |
+| Memory | Per-run `RunState` Pydantic model (`src/repo_doc_governance/state.py`) carrying inventory, drift findings, stale-artifact candidates, verification results, per-phase diffs, PR body draft. No cross-run memory — each repo run is independent. Cross-process checkpoint saving (`agent_tool_llm_utils.save_checkpoint`) wires up in PR #3. |
 | Context mgmt | *(PR #4)* Phase-scoped LLM context; only Phase 5 (agent-instruction consolidation) loads all AGENTS / CLAUDE / GEMINI / Copilot files together |
-| Prompt construction | *(PR #2)* Skill body + `phases.md` + `decisions.md` + `templates.md` vendored from `agent-skills/plugins/repo-documentation-governance/` at a pinned SHA with `<!-- DO NOT EDIT — vendored from … -->` header |
+| Prompt construction | Skill body + `phases.md` + `decisions.md` + `templates.md` vendored from `agent-skills/plugins/repo-documentation-governance/` at a pinned SHA into `src/repo_doc_governance/prompts/`. Every vendored file carries `<!-- DO NOT EDIT — vendored from … @ <SHA>. Edit upstream + re-vendor. -->` on line 1. Refresh via `make re-vendor`. |
 | Output parsing | *(PR #3+)* Pydantic models for inventory, findings, classifications, PR body |
-| State | *(PR #3)* `agent_tool_llm_utils.save_checkpoint` per-phase checkpoint JSON; resumable from any phase |
+| State | `RunState` Pydantic model is the in-process state; `phases_completed` / `phases_failed` / `started_at` / `completed_at` track execution metadata. Cross-process checkpoint-and-resume via `agent_tool_llm_utils.save_checkpoint` lands in PR #3. |
 | Error handling | *(PR #3+)* `agent_tool_llm_utils.retry_async` with `not is_transient(...)` fatal classifier; per-phase exception isolation (one phase fails → mark and continue, PR notes the skip) |
 | Guardrails | *(PR #5)* Input sanitization; refuse-list enforcement on Phase 8 Tier-2 command execution; `git ls-files --error-unmatch` check before delete |
 | Verification | *(PR #4)* Tier-1 read-only (paths exist, links resolve, commands defined); Tier-2 best-effort command execution behind refuse-list; one retry per phase via the `verification-retry-loop` skill pattern |
