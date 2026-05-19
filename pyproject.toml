@@ -1,0 +1,55 @@
+[project]
+name = "agent-harness-repo-doc-governance"
+version = "0.1.0-rc"
+description = "Portable LangChain harness for repo documentation cleanup + AI-agent instruction consolidation. Outputs a PR, not a merge. 12-component agent harness."
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Chris Moore" }]
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "httpx>=0.27",
+    "pydantic>=2.0",
+    "langchain-core>=0.3",
+    "langchain-openai>=0.3",
+    "langgraph>=0.3",
+    "python-dotenv>=1.0",
+    "PyYAML>=6.0",
+    "agent-tool-llm-utils",
+    "agent-tool-token-tracker",
+    "agent-tool-pipeline-trace",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+]
+
+[project.scripts]
+repo-doc-gov = "repo_doc_governance.cli:main"
+
+[tool.uv.sources]
+agent-tool-llm-utils         = { git = "https://github.com/PatientVibes/agent-tool-llm-utils.git",        rev = "cfdf9aba6aa0ccc9c37860a9bef53853e4504237" }
+agent-tool-token-tracker     = { git = "https://github.com/PatientVibes/agent-tool-token-tracker.git",    rev = "d16943fdb0516f386ac798e1527526775ef52af1" }
+agent-tool-pipeline-trace    = { git = "https://github.com/PatientVibes/agent-tool-pipeline-trace.git",   rev = "54545a8c48a2e9daef571ca0491d0fbd646b159c" }
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["repo_doc_governance*"]
+
+[tool.setuptools.package-data]
+repo_doc_governance = ["prompts/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+markers = [
+    "integration: marks tests requiring a real LLM or external network access",
+]

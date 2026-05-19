@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual envs
+.venv/
+venv/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime artifacts
+.env
+.env.local
+*.log
+output/
+runs/
+checkpoints/
+*.trace.jsonl
+
+# Local hardlinks to CLAUDE.md (re-link manually after Edit-tool replaces)
+AGENTS.md
+GEMINI.md
