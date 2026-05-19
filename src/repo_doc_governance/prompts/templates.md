@@ -1,4 +1,4 @@
-<!-- DO NOT EDIT — vendored from agent-skills/plugins/repo-documentation-governance/agents/references/templates.md @ 2d4e2aac7677914bcd417cb752f1a7e9a4e72194. Edit upstream + re-vendor via "make re-vendor". -->
+<!-- DO NOT EDIT — vendored from agent-skills/plugins/repo-documentation-governance/agents/references/templates.md @ 86bbeeaadda6eef66c9923dd15cd5ca819412eba. Edit upstream + re-vendor via "make re-vendor". -->
 
 # Document templates
 
