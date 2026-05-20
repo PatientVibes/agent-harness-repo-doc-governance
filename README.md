@@ -6,18 +6,20 @@ consolidation. Ports the Claude Code `repo-documentation-governance` subagent
 into a CLI / HTTP / batch-runnable form for CI, cron, webhooks, and unattended
 sweeps. Outputs a Pull Request — does NOT merge. 12-component agent harness.
 
-## Status: v0.1.0-rc (Phase 9 + safety gates landed in PR #5)
+## Status: v0.1.0 — feature complete (6-PR build sequence shipped 2026-05-19)
 
-PRs #1–#5 have landed:
+All six PRs of the design-spec build sequence have landed:
+
 - PR #1 — repo scaffold
 - PR #2 — vendored prompts + orchestrator skeleton + `make re-vendor` / `verify-no-local-edits`
 - PR #3 — deterministic phases (1, 2, 3, 7, 8 Tier-1)
 - PR #4 — LLM phases (4 README, 5 agent-instruction consolidation, 6 HANDOFF) with injectable `LLMRunner`
-- PR #5 — Phase 9 PR creation, Phase 8 Tier-2 opt-in execution, refuse-list, `PRCreator` interface, safety-invariant integration tests (`BranchPolicyError`, `PathOutsideRepoError`, `UntrackedFileError`, `RefusedCommandError`)
+- PR #5 — Phase 9 PR creation, Phase 8 Tier-2 opt-in execution, refuse-list, `PRCreator` interface, safety-invariant integration tests
+- PR #6 — CLI subcommands (`run` / `audit` / `batch`), FastAPI HTTP routes, Claude Code subagent thin-wrapper update, catalog refresh
 
-Remaining: PR #6 (modes / subagent wrapper / catalog refresh). Status flips
-to `v0.1.0` when PR #6 lands. See the
-[design spec](https://github.com/PatientVibes/ai-agents/blob/master/docs/superpowers/specs/2026-05-19-agent-harness-repo-doc-governance-design.md).
+The design spec at
+[`docs/superpowers/specs/2026-05-19-agent-harness-repo-doc-governance-design.md`](https://github.com/PatientVibes/ai-agents/blob/master/docs/superpowers/specs/2026-05-19-agent-harness-repo-doc-governance-design.md)
+flipped from `draft` to `implemented` on the PR-#6 commit.
 
 ## What it does (when complete)
 
@@ -78,7 +80,7 @@ Three PatientVibes tools are pulled from GitHub via `[tool.uv.sources]` in `pypr
 | Error handling | Per-phase exception isolation — `NotImplementedError` from a not-yet-landed phase is caught, recorded as a `PhaseFailure`, and the orchestrator continues. `agent_tool_llm_utils.retry_async` for LLM phases lands in PR #4. |
 | Guardrails | `safety.py` — `BranchPolicyError` (never commit to main/master/base), `PathOutsideRepoError` (never write outside the target repo), `UntrackedFileError` (never delete an untracked file; `git ls-files --error-unmatch` at the delete step), `RefusedCommandError` (Tier-2 refuse-list — `curl|bash`, `rm -rf`, `npm publish`, `kubectl apply`, `terraform apply`, ...). All four are exercised by integration tests against real temp git repos. |
 | Verification | Tier-1 read-only checks (PR #3) — `path_exists`, `internal_link_resolves`, `command_declared` recorded as typed `VerificationResult`. Tier-2 best-effort command execution behind the refuse-list (PR #5) — opt-in via `state.execute_tier2 = True`; off by default. Each command's manifest script body is inspected against the refuse-list BEFORE execution. |
-| Subagent orchestration | *(PR #6)* Monorepo case spawns per-package mini-runs (semaphore-bounded); batch mode parallelizes across repos |
+| Subagent orchestration | `batch` mode (`repo-doc-gov batch --config repos.yaml --concurrency N`) runs `manual` mode against many repos in parallel via a `ThreadPoolExecutor`. Monorepo-as-many-packages is supported by listing each package as its own entry in the batch config. |
 | Token tracking | `LLMRunner.run()` returns an `LLMRunResult` with `input_tokens` / `output_tokens` / `latency_s` / `model` / `tool_calls` populated from each LLM call. Phase-9 PR builder wires these into `agent_tool_token_tracker.TokenTracker` in PR #5. |
 
 Cells flip from `*(PR #N)*` to a concrete description as each PR lands.
