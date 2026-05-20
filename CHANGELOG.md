@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added (Phase 5 + Phase 6 prompt tightening — same anti-pattern as Phase 4 pre-v0.1.2)
+
+Phases 5 and 6 previously pushed the LLM to fetch existing files via a
+`read_file` tool. That design was never validated against a real LLM,
+and the Phase 4 v0.1.2 fix is strong evidence that inlining the current
+content directly in the prompt is the more robust pattern. This PR
+applies the same fix to Phase 5 (agent instructions) and Phase 6
+(handoff / TODO / ROADMAP). Closes #12.
+
+- **Phase 5 user prompt now includes the body of every existing
+  agent-instruction file** under a "CURRENT AGENT-INSTRUCTION FILES
+  (preserve all content unless flagged as drift)" header. Includes
+  every `AGENT_INSTRUCTIONS` / `COPILOT_INSTRUCTIONS` file from the
+  inventory (so `.github/copilot-instructions.md` and other nested
+  locations are read, not just root-level files).
+- **Phase 6 user prompt now includes the body of every existing
+  HANDOFF / TODO / ROADMAP file** under a "CURRENT HANDOFF / TODO /
+  ROADMAP FILES" header with an explicit per-TODO decision contract
+  (kept / rewritten / completed / archived / deleted / `Needs
+  verification`).
+- **Phase 5 and Phase 6 system prompts rewritten to mirror Phase 4's
+  seven hard rules** where applicable: preserve-existing-content
+  (unless drift-flagged), no-title-renames, omit-empty-sections,
+  manifest-faithful commands, cross-repo references are content,
+  `Needs verification` items survive, raw markdown output only.
+- Tests: `test_phase5_includes_current_agent_file_content` and
+  `test_phase6_includes_current_handoff_content` gate the load-bearing
+  user-prompt fixes. 119 tests total.
+
 ## [0.1.2] — 2026-05-20
 
 ### Added (Phase 4 prompt tightening + Phase 9 no-change handling)

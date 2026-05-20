@@ -64,6 +64,30 @@ def test_handoff_phase_passes_drift_findings_for_handoff_files(tmp_path: Path):
     assert "stale_todo" in stub.calls[0]["user_prompt"]
 
 
+def test_phase6_includes_current_handoff_content(tmp_path: Path):
+    """Load-bearing — the LLM must see the EXISTING HANDOFF/TODO/ROADMAP
+    file content so it can honor the "preserve every TODO" rule. Without
+    this, the LLM falls back to writing from the template skeleton (the
+    "rewriting for tone only" anti-pattern Phase 4 had pre-v0.1.2).
+    """
+    repo = build_drifted_repo(tmp_path)
+    state = make_run_state(repo, Task.FULL_PASS)
+    survey.run(state)
+    drift_audit.run(state)
+
+    stub = StubLLMRunner(text="# Handoff\n\nUpdated.\n")
+    llm_runtime.set_runner(stub)
+    handoff.run(state)
+
+    user_prompt = stub.calls[0]["user_prompt"]
+    assert "CURRENT HANDOFF" in user_prompt
+    # The drifted fixture's docs/HANDOFF.md body must survive into the prompt.
+    assert "clean up later" in user_prompt
+    assert "rewrite to TypeScript" in user_prompt
+    # And the explicit "every TODO ... explicit decision" instruction.
+    assert "explicit decision" in user_prompt.lower() or "preserve" in user_prompt.lower()
+
+
 def test_handoff_phase_empty_response_leaves_diff_empty(tmp_path: Path):
     repo = build_drifted_repo(tmp_path)
     state = make_run_state(repo, Task.FULL_PASS)
