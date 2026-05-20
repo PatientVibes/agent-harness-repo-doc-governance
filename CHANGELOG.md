@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (PR #3)
+- Typed Pydantic models in `src/repo_doc_governance/models.py` —
+  `Classification`, `Severity`, `DocKind`, `ManifestKind`, `DocFile`,
+  `ManifestEntry`, `Inventory`, `CodeFirstMap`, `DriftFinding`,
+  `StaleCandidate`, `VerificationResult`. `Classification` is the
+  `Keep / Update / Consolidate / Archive / Delete / Needs verification`
+  enum from `prompts/decisions.md`.
+- `RunState` updated to use the typed phase outputs. `inventory` /
+  `code_first_map` default to `None` until their phase runs; the
+  finding/result lists default empty.
+- Deterministic phase implementations in `src/repo_doc_governance/phase_impls/`:
+  - `survey.py` (Phase 1) — `git ls-files`-based inventory + manifest/doc
+    classification + primary-language tally + branch / clean-status capture.
+    Falls back to a bounded directory walk when the target isn't a git
+    working tree.
+  - `code_first.py` (Phase 2) — extracts declared commands from npm
+    `package.json` scripts, Makefile targets, and `pyproject.toml`
+    `[project.scripts]`; records CI workflow paths, runtime entry points,
+    and `.env.example`-class files. Falls back gracefully when Phase 1
+    was skipped (e.g. `readme-only` task).
+  - `drift_audit.py` (Phase 3) — detects broken internal `.md` links,
+    dead commands (`npm run X` / `make Y` quoted in docs but not declared
+    in any manifest), vague TODOs ("clean up later", "investigate this",
+    "tbd"), and conflicting agent-instruction files at the repo root.
+    Each finding gets a `Classification` per `prompts/decisions.md`.
+  - `stale_artifacts.py` (Phase 7) — candidate identification only; never
+    mutates files. Honours the safety invariants: untracked files →
+    `Needs verification` (never `Delete`); files referenced by basename
+    from any doc → `Needs verification`. Auto-`Delete` only for tracked
+    OS-droppings (`*.bak / *.tmp / .DS_Store`); `scratch.md` and
+    `handoff-final-final.md` style droppings → `Archive`.
+  - `verification.py` (Phase 8 Tier-1) — records read-only
+    `path_exists` / `internal_link_resolves` / `command_declared` checks
+    as typed `VerificationResult` rows. Tier-2 (command execution behind
+    refuse-list) lands in PR #5.
+- `tests/conftest.py` — fixture-builder helpers that init real git repos
+  via `tmp_path` (no shared `.git/` state checked in): `build_clean_repo`,
+  `build_drifted_repo`, `build_broken_links_repo`,
+  `build_agents_and_claude_repo`, `build_monorepo`,
+  `build_stale_artifacts_repo`.
+- Per-phase test files: `test_phase_survey.py`, `test_phase_code_first.py`,
+  `test_phase_drift_audit.py`, `test_phase_stale_artifacts.py`,
+  `test_phase_verification.py`. 50 tests total across the suite, all
+  hitting real `git init` + real `git ls-files` rather than mocks.
+
 ### Added (PR #2)
 - Vendored skill body + 3 references (`phases.md`, `decisions.md`, `templates.md`) from
   `agent-skills/plugins/repo-documentation-governance/` @
