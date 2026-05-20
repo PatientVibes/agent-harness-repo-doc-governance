@@ -50,8 +50,14 @@ def test_phases_are_strictly_ascending_within_each_task():
         )
 
 
-def test_readme_only_runs_phases_2_4_9():
+def test_readme_only_runs_survey_then_2_4_9():
+    """README_ONLY includes Phase 1 (Survey) so Phase 4 has an inventory.
+    The skill triage table calls out "2, 4, 9" but the harness implementation
+    needs Phase 1 to populate `state.inventory`. Phase 1 is fast enough
+    that running it is the right call regardless of task.
+    """
     assert phases_for_task(Task.README_ONLY) == [
+        Phase.SURVEY,
         Phase.CODE_FIRST,
         Phase.README,
         Phase.PR_HANDOFF,
@@ -213,7 +219,7 @@ def test_summary_includes_expected_keys(tmp_path: Path):
     }
     assert expected_keys <= set(s.keys())
     assert s["task"] == "readme-only"
-    assert s["phases_to_run"] == ["CODE_FIRST", "README", "PR_HANDOFF"]
+    assert s["phases_to_run"] == ["SURVEY", "CODE_FIRST", "README", "PR_HANDOFF"]
 
 
 def test_summary_failed_entries_have_error_type(tmp_path: Path):
