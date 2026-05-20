@@ -113,6 +113,7 @@ def _build_dispatch() -> dict[Phase, PhaseFn]:
         code_first,
         drift_audit,
         handoff,
+        pr_handoff,
         readme,
         stale_artifacts,
         survey,
@@ -128,6 +129,7 @@ def _build_dispatch() -> dict[Phase, PhaseFn]:
     dispatch[Phase.HANDOFF] = handoff.run
     dispatch[Phase.STALE_ARTIFACTS] = stale_artifacts.run
     dispatch[Phase.VERIFICATION] = verification.run
+    dispatch[Phase.PR_HANDOFF] = pr_handoff.run
     return dispatch
 
 

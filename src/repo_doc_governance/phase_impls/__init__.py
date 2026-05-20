@@ -12,6 +12,7 @@ from repo_doc_governance.phase_impls import (
     code_first,
     drift_audit,
     handoff,
+    pr_handoff,
     readme,
     stale_artifacts,
     survey,
@@ -27,4 +28,5 @@ __all__ = [
     "handoff",
     "stale_artifacts",
     "verification",
+    "pr_handoff",
 ]

@@ -115,11 +115,10 @@ def test_run_state_default_collections_are_empty(tmp_path: Path):
 # ---- run() exception-handling path -----------------------------------------
 
 
-def test_run_after_pr4_completes_through_readme_phase(tmp_path: Path):
-    """PR #4 lands LLM Phases 4/5/6. README_ONLY runs
-    [CODE_FIRST, README, PR_HANDOFF]; with the stub runner injected,
-    Phase 4 (README) now completes. Only PR_HANDOFF stays a stub.
-    """
+def test_run_after_pr5_all_phases_complete_in_dry_run(tmp_path: Path):
+    """PR #5 lands Phase 9 (default dry-run — builds PR body, does NOT
+    touch disk or call gh). With the stub LLM injected, every phase in
+    README_ONLY now completes."""
     from repo_doc_governance import llm_runtime
     from repo_doc_governance.llm_runtime import StubLLMRunner
 
@@ -132,17 +131,15 @@ def test_run_after_pr4_completes_through_readme_phase(tmp_path: Path):
 
     assert Phase.CODE_FIRST in result.phases_completed
     assert Phase.README in result.phases_completed
-    failed_phases = [f.phase for f in result.phases_failed]
-    assert failed_phases == [Phase.PR_HANDOFF]
-    assert all(f.error_type == "NotImplementedError" for f in result.phases_failed)
+    assert Phase.PR_HANDOFF in result.phases_completed
+    assert result.phases_failed == []
+    assert result.pr_body_draft != ""
 
 
-def test_drift_sweep_after_pr3_all_deterministic_phases_complete(tmp_path: Path):
+def test_drift_sweep_all_phases_complete_dry_run(tmp_path: Path):
     """DRIFT_SWEEP runs SURVEY, DRIFT_AUDIT, STALE_ARTIFACTS, VERIFICATION,
-    PR_HANDOFF. The first four are deterministic (PR #3); only PR_HANDOFF
-    is still a stub."""
-    # Make tmp_path look like an empty git repo so the deterministic
-    # phases have something to run against.
+    PR_HANDOFF. None of these uses an LLM; PR_HANDOFF is dry-run by default
+    (just builds the PR body string). All five should complete cleanly."""
     import subprocess
     subprocess.run(["git", "init", "-q"], cwd=str(tmp_path), check=True)
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
@@ -156,9 +153,10 @@ def test_drift_sweep_after_pr3_all_deterministic_phases_complete(tmp_path: Path)
     assert Phase.DRIFT_AUDIT in result.phases_completed
     assert Phase.STALE_ARTIFACTS in result.phases_completed
     assert Phase.VERIFICATION in result.phases_completed
+    assert Phase.PR_HANDOFF in result.phases_completed
 
-    failed_phases = [f.phase for f in result.phases_failed]
-    assert failed_phases == [Phase.PR_HANDOFF]
+    assert result.phases_failed == []
+    assert result.pr_body_draft != ""
 
 
 def test_run_records_timestamps(tmp_path: Path):

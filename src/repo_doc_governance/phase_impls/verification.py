@@ -1,12 +1,15 @@
-"""Phase 8 — Safe verification (Tier 1 only in PR #3).
+"""Phase 8 — Safe verification.
 
-Tier 1 is required and read-only. It produces a `VerificationResult` per
-check, recording whether each path / link / command claim in the updated
-docs actually resolves.
+Tier 1 (always-on, read-only) produces a `VerificationResult` per check,
+recording whether each path / link / command claim in the updated docs
+actually resolves.
 
-Tier 2 (command execution behind the refuse-list) lands in PR #5 together
-with the safety-invariant integration tests — keeping it out of PR #3
-preserves the contract that PR #3 has no external side-effects.
+Tier 2 (opt-in, command execution) runs only when `state.execute_tier2`
+is True. For every declared command that passes a refuse-list inspection
+of both the command string AND the body of its manifest script, the
+phase executes it with a 120s timeout and records the result. Commands
+that fail the refuse-list are recorded as `Not run` with the reason — the
+LLM is never involved in the decision.
 
 Checks performed:
   - `path_exists`     — every doc-file path is present on disk.
@@ -23,8 +26,11 @@ table. Same input, different output shape.
 from __future__ import annotations
 
 import re
+import shlex
+import subprocess
 from pathlib import Path
 
+from repo_doc_governance import safety
 from repo_doc_governance.models import DocFile, DocKind, VerificationResult
 from repo_doc_governance.state import RunState
 
@@ -79,7 +85,86 @@ def run(state: RunState) -> RunState:
         results.extend(_check_commands(repo, doc, declared))
 
     state.verification_results.extend(results)
+
+    if state.execute_tier2:
+        _run_tier2(state)
+
     return state
+
+
+# ---------------------------------------------------------------------------
+# Tier-2 — opt-in command execution behind refuse-list
+# ---------------------------------------------------------------------------
+
+
+def _run_tier2(state: RunState) -> None:
+    """Execute declared commands that survive the refuse-list. Records
+    one `command_execution` `VerificationResult` per command — `ok=True`
+    if exit-zero, `ok=False` otherwise (including refused).
+    """
+    if state.inventory is None:
+        return
+    repo = state.target_repo
+
+    # The set of commands worth attempting: those that were declared and
+    # whose declaration check passed in Tier 1.
+    candidates: set[tuple[str, str]] = set()  # (manifest_path, cmd)
+    for vr in state.verification_results:
+        if vr.check != "command_declared" or not vr.ok:
+            continue
+        # vr.target is "<doc_path>: <cmd>" — pull cmd back out.
+        _, _, cmd = vr.target.partition(": ")
+        if not cmd:
+            continue
+        for m in state.inventory.manifests:
+            if cmd in m.declared_commands:
+                candidates.add((m.path, cmd))
+                break
+
+    for manifest_path, cmd in candidates:
+        try:
+            script_body = (repo / manifest_path).read_text(
+                encoding="utf-8", errors="replace"
+            )
+        except OSError:
+            script_body = ""
+        try:
+            safety.assert_command_safe(cmd, script_body)
+        except safety.RefusedCommandError as exc:
+            state.verification_results.append(
+                VerificationResult(
+                    check="command_execution",
+                    target=cmd,
+                    ok=False,
+                    detail=f"Not run: {exc}",
+                )
+            )
+            continue
+
+        try:
+            result = subprocess.run(
+                shlex.split(cmd),
+                cwd=str(repo),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=120,
+            )
+            ok = result.returncode == 0
+            detail = f"exit={result.returncode}"
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+            ok = False
+            detail = f"execution error: {exc}"
+
+        state.verification_results.append(
+            VerificationResult(
+                check="command_execution",
+                target=cmd,
+                ok=ok,
+                detail=detail,
+            )
+        )
 
 
 def _check_internal_links(repo: Path, doc: DocFile) -> list[VerificationResult]:

@@ -6,17 +6,17 @@ consolidation. Ports the Claude Code `repo-documentation-governance` subagent
 into a CLI / HTTP / batch-runnable form for CI, cron, webhooks, and unattended
 sweeps. Outputs a Pull Request — does NOT merge. 12-component agent harness.
 
-## Status: v0.1.0-rc (LLM phases landed in PR #4)
+## Status: v0.1.0-rc (Phase 9 + safety gates landed in PR #5)
 
-PRs #1–#4 have landed:
+PRs #1–#5 have landed:
 - PR #1 — repo scaffold
 - PR #2 — vendored prompts + orchestrator skeleton + `make re-vendor` / `verify-no-local-edits`
 - PR #3 — deterministic phases (1, 2, 3, 7, 8 Tier-1)
-- PR #4 — LLM phases (4 README, 5 agent-instruction consolidation, 6 HANDOFF) with `create_react_agent` + repo-scoped file tools + injectable `LLMRunner` for tests
+- PR #4 — LLM phases (4 README, 5 agent-instruction consolidation, 6 HANDOFF) with injectable `LLMRunner`
+- PR #5 — Phase 9 PR creation, Phase 8 Tier-2 opt-in execution, refuse-list, `PRCreator` interface, safety-invariant integration tests (`BranchPolicyError`, `PathOutsideRepoError`, `UntrackedFileError`, `RefusedCommandError`)
 
-Remaining: PR #5 (PR creation + safety-invariant integration tests), PR #6
-(modes + subagent wrapper + catalog refresh). Status flips to `v0.1.0` when
-PR #6 lands. See the
+Remaining: PR #6 (modes / subagent wrapper / catalog refresh). Status flips
+to `v0.1.0` when PR #6 lands. See the
 [design spec](https://github.com/PatientVibes/ai-agents/blob/master/docs/superpowers/specs/2026-05-19-agent-harness-repo-doc-governance-design.md).
 
 ## What it does (when complete)
@@ -76,8 +76,8 @@ Three PatientVibes tools are pulled from GitHub via `[tool.uv.sources]` in `pypr
 | Output parsing | Pydantic models in `src/repo_doc_governance/models.py` — `Inventory`, `CodeFirstMap`, `DriftFinding`, `StaleCandidate`, `VerificationResult`. The `Classification` enum (`Keep / Update / Consolidate / Archive / Delete / Needs verification`) is the contract from `prompts/decisions.md`. |
 | State | `RunState` Pydantic model is the in-process state; `phases_completed` / `phases_failed` / `started_at` / `completed_at` track execution metadata. Cross-process checkpoint-and-resume via `agent_tool_llm_utils.save_checkpoint` lands in PR #4. |
 | Error handling | Per-phase exception isolation — `NotImplementedError` from a not-yet-landed phase is caught, recorded as a `PhaseFailure`, and the orchestrator continues. `agent_tool_llm_utils.retry_async` for LLM phases lands in PR #4. |
-| Guardrails | *(PR #5)* Refuse-list enforcement on Phase 8 Tier-2 command execution; `git ls-files --error-unmatch` check before delete (already in Phase 7 candidate classification — `Needs verification` rather than `Delete` for untracked files). |
-| Verification | Tier-1 read-only checks landed in PR #3 — `path_exists`, `internal_link_resolves`, `command_declared` results recorded as typed `VerificationResult`. Tier-2 best-effort command execution behind refuse-list lands in PR #5. |
+| Guardrails | `safety.py` — `BranchPolicyError` (never commit to main/master/base), `PathOutsideRepoError` (never write outside the target repo), `UntrackedFileError` (never delete an untracked file; `git ls-files --error-unmatch` at the delete step), `RefusedCommandError` (Tier-2 refuse-list — `curl|bash`, `rm -rf`, `npm publish`, `kubectl apply`, `terraform apply`, ...). All four are exercised by integration tests against real temp git repos. |
+| Verification | Tier-1 read-only checks (PR #3) — `path_exists`, `internal_link_resolves`, `command_declared` recorded as typed `VerificationResult`. Tier-2 best-effort command execution behind the refuse-list (PR #5) — opt-in via `state.execute_tier2 = True`; off by default. Each command's manifest script body is inspected against the refuse-list BEFORE execution. |
 | Subagent orchestration | *(PR #6)* Monorepo case spawns per-package mini-runs (semaphore-bounded); batch mode parallelizes across repos |
 | Token tracking | `LLMRunner.run()` returns an `LLMRunResult` with `input_tokens` / `output_tokens` / `latency_s` / `model` / `tool_calls` populated from each LLM call. Phase-9 PR builder wires these into `agent_tool_token_tracker.TokenTracker` in PR #5. |
 
