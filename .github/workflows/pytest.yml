@@ -1,0 +1,48 @@
+name: pytest
+
+# Run the full pytest suite on every PR + push to master. Pairs with
+# audit.yml — together they gate merges on (a) the harness's own docs
+# staying clean and (b) the test suite passing.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: [self-hosted, repo-doc-gov]
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install harness + dev deps
+        run: uv sync --frozen --all-extras
+
+      - name: Run pytest
+        # set -o pipefail so the test failure exit code survives the
+        # | tee, matching the audit workflow's pattern.
+        shell: bash
+        run: |
+          set -o pipefail
+          uv run pytest -q --tb=short | tee pytest-output.txt
+
+      - name: Upload pytest output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-${{ github.run_id }}
+          path: pytest-output.txt
+          if-no-files-found: warn
+          retention-days: 14
