@@ -1,0 +1,54 @@
+name: audit
+
+# Self-policing dogfood: run `repo-doc-gov audit` against this repo on
+# every PR + on push to master. The harness gates its own merges on its
+# own audit output. Matches the "CI gate on the harness itself" line
+# from the design spec's § Verification.
+#
+# Runs on the self-hosted gh-runner that's repo-scoped to this repo.
+# Audit mode is read-only and never invokes an LLM — no API key required.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: [self-hosted, repo-doc-gov]
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install harness (uv sync)
+        run: uv sync --frozen
+
+      - name: Run audit (--fail-on high)
+        run: |
+          uv run repo-doc-gov audit \
+            --repo . \
+            --fail-on high \
+            --trace .audit-trace.jsonl \
+            | tee audit-report.json
+
+      - name: Upload audit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-${{ github.run_id }}
+          path: |
+            audit-report.json
+            .audit-trace.jsonl
+          if-no-files-found: warn
+          retention-days: 14
