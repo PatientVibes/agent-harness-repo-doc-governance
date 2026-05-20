@@ -32,6 +32,9 @@ runs/
 checkpoints/
 *.trace.jsonl
 
+# Local dogfood traces (one per run; useful for post-mortem but never committed)
+dogfood-*.jsonl
+
 # Local pre-push pr-reviewer artifacts
 .pr-review/
 .pr-review-log.txt
