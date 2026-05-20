@@ -152,6 +152,85 @@ def test_regular_doc_dead_command_stays_high_update(tmp_path: Path):
     assert f.severity == Severity.HIGH
 
 
+def test_refuse_list_documentation_does_not_flag_as_dead_command(tmp_path: Path):
+    """A README that documents the harness's refuse-list (e.g. `npm publish`,
+    `kubectl apply`) must NOT produce a high-severity `dead_command`
+    finding. Surfaced by the harness's own README dogfood under PR #8.
+    """
+    import json
+    import subprocess
+
+    repo = tmp_path / "rl"
+    repo.mkdir()
+    (repo / "README.md").write_text(
+        "# rl-fixture\n\n"
+        "## Safety\n\n"
+        "`RefusedCommandError` (Tier-2 refuse-list — `npm publish`, "
+        "`kubectl apply`) is raised when a Tier-2 command matches the "
+        "refuse-list.\n",
+        encoding="utf-8",
+    )
+    (repo / "package.json").write_text(
+        json.dumps(
+            {"name": "rl", "version": "0.0.1", "scripts": {"test": "echo ok"}}
+        ),
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=str(repo), check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=str(repo), check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=str(repo), check=True)
+    subprocess.run(["git", "add", "."], cwd=str(repo), check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "i"], cwd=str(repo), check=True)
+
+    state = _run_through_phase3(repo)
+
+    # No high-severity `dead_command` should be emitted for `npm publish`.
+    dead = [
+        f for f in state.drift_findings
+        if f.kind == "dead_command" and "npm publish" in f.detail
+    ]
+    assert dead == [], (
+        f"`npm publish` was flagged as a dead_command despite appearing "
+        f"in refuse-list documentation context. Findings: {dead}"
+    )
+
+    # Instead it should be recorded as `dead_command_in_refuse_list_documentation`
+    # at INFO + Keep — surfaced for transparency, not for action.
+    refuse_list = [
+        f for f in state.drift_findings
+        if f.kind == "dead_command_in_refuse_list_documentation"
+    ]
+    assert len(refuse_list) >= 1
+    assert any("npm publish" in f.detail for f in refuse_list)
+
+    from repo_doc_governance.models import Severity
+    assert all(f.severity == Severity.INFO for f in refuse_list)
+    assert all(f.classification == Classification.KEEP for f in refuse_list)
+
+
+def test_line_is_refuse_list_documentation_matches_expected_keywords():
+    """Unit test of the line-context classifier."""
+    from repo_doc_governance.phase_impls.drift_audit import (
+        _line_is_refuse_list_documentation,
+    )
+
+    # Positive — words the issue calls out plus reasonable variants.
+    assert _line_is_refuse_list_documentation("the refuse-list contains `npm publish`")
+    assert _line_is_refuse_list_documentation("the refuse list contains `npm publish`")
+    assert _line_is_refuse_list_documentation("refused commands include `npm publish`")
+    assert _line_is_refuse_list_documentation("refuses to run `npm publish`")
+    assert _line_is_refuse_list_documentation("blocked: `kubectl apply`")
+    assert _line_is_refuse_list_documentation("blocklist: `rm -rf /`")
+    assert _line_is_refuse_list_documentation("denylist includes `npm publish`")
+    assert _line_is_refuse_list_documentation("rejected by safety: `make deploy`")
+    assert _line_is_refuse_list_documentation("forbidden command `npm publish`")
+
+    # Negative — running a command, not refusing one.
+    assert not _line_is_refuse_list_documentation("Run `npm test` to start.")
+    assert not _line_is_refuse_list_documentation("Use `npm publish` to release.")
+    assert not _line_is_refuse_list_documentation("First, run `make build`.")
+
+
 def test_is_aspirational_doc_matches_plan_dirs():
     """Spec-level test of the path classifier itself."""
     assert drift_audit.is_aspirational_doc("docs/superpowers/plans/x.md")
