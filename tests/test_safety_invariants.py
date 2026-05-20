@@ -225,6 +225,74 @@ def test_phase9_force_recreates_stale_local_branch(tmp_path: Path, capsys):
     assert expected_branch in captured.err
 
 
+def test_phase9_force_recreates_stale_local_branch_when_it_is_current_head(
+    tmp_path: Path, capsys
+):
+    """Surfaced in v0.1.4 dogfood retry (#32): the v0.1.3 stale-branch
+    fix can't delete the branch you're standing on — `git branch -D`
+    refuses to remove HEAD. When the previous Phase 9 run left HEAD on
+    the feature branch and `gh pr close --delete-branch` only cleaned
+    the remote, the next run hit `CalledProcessError` on the force
+    delete. Phase 9 now checks out `base_branch` first when HEAD is on
+    the stale branch.
+    """
+    from repo_doc_governance import pr_builder
+
+    repo = tmp_path / "repo"
+    _init_repo(
+        repo,
+        {
+            "README.md": "# x\n",
+            "package.json": json.dumps(
+                {"name": "x", "version": "0.0.1", "scripts": {"test": "echo ok"}}
+            ),
+        },
+        branch="main",
+    )
+
+    bare = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", str(bare)],
+        cwd=str(repo), check=True,
+    )
+
+    pr_handoff_phase.set_pr_creator(NullPRCreator())
+    llm_runtime.set_runner(StubLLMRunner(text="# x\n\nupdated\n"))
+
+    state = make_run_state(repo, Task.FULL_PASS)
+    state.execute_phase9 = True
+    state.base_branch = "main"
+
+    survey.run(state)
+    code_first.run(state)
+    drift_audit.run(state)
+    state.readme_proposed = "# x\n\nupdated body\n"
+    stale_artifacts.run(state)
+    verification.run(state)
+
+    expected_branch = pr_builder.build_pr_plan(state).branch_name
+    # Pre-create the would-be feature branch AND check out to it. This
+    # is the exact state `gh pr close --delete-branch` leaves the
+    # operator in.
+    subprocess.run(
+        ["git", "checkout", "-b", expected_branch],
+        cwd=str(repo), check=True,
+    )
+    assert _current_branch(repo) == expected_branch  # sanity
+
+    # Phase 9 must NOT raise on the pre-existing branch even when HEAD
+    # is on it.
+    pr_handoff.run(state)
+
+    assert _current_branch(repo) == expected_branch, (
+        "Phase 9 should end with HEAD on the recreated feature branch."
+    )
+    captured = capsys.readouterr()
+    assert "already exists" in captured.err
+    assert expected_branch in captured.err
+
+
 def test_phase9_does_not_commit_to_main_when_executed(tmp_path: Path):
     """End-to-end: with execute_phase9=True, Phase 9 must end on a
     feature branch and `main` must have its original commit count."""

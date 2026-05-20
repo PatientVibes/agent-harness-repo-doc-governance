@@ -78,7 +78,9 @@ def _execute_plan(state: RunState, plan: pr_builder.PRPlan) -> None:
     #    branch with the same name exists (e.g. from a prior failed
     #    Phase 9 run that crashed between branch creation and PR open),
     #    force-delete it first so `checkout -b` does not exit 128.
-    _delete_stale_local_branch_if_present(repo, plan.branch_name, state)
+    _delete_stale_local_branch_if_present(
+        repo, plan.branch_name, plan.base_branch, state
+    )
     _git(repo, "checkout", "-b", plan.branch_name)
 
     # 3) Apply file writes (safety: path-inside-repo).
@@ -140,12 +142,16 @@ def _execute_plan(state: RunState, plan: pr_builder.PRPlan) -> None:
 
 
 def _delete_stale_local_branch_if_present(
-    repo: Path, branch_name: str, state: RunState
+    repo: Path, branch_name: str, base_branch: str, state: RunState
 ) -> None:
     """If `branch_name` already exists locally, force-delete it before
     `git checkout -b` collides. Surfaced twice during the v0.1.2
     real-LLM dogfood (a failed PR-creation step leaves the branch in
-    place; the next run's checkout fails with exit 128).
+    place; the next run's checkout fails with exit 128). When HEAD
+    happens to be on the stale branch itself (surfaced by the v0.1.4
+    dogfood — `gh pr close --delete-branch` removes the remote but
+    not the local HEAD), `git branch -D` would refuse to delete the
+    current branch — so we checkout `base_branch` first.
 
     The cleanup is visible to the operator: a one-line stderr warning
     plus a `phase9_stale_branch_deleted` trace event when tracing is
@@ -170,7 +176,29 @@ def _delete_stale_local_branch_if_present(
             "phase9_stale_branch_deleted",
             branch=branch_name,
         )
+    # If HEAD is on the stale branch, `git branch -D` refuses. Switch
+    # to base first — same ref we're about to branch off anyway.
+    if _git_current_branch(repo) == branch_name:
+        _git(repo, "checkout", base_branch)
     _git(repo, "branch", "-D", branch_name)
+
+
+def _git_current_branch(repo: Path) -> str | None:
+    """Return HEAD's branch name, or None if detached / unreadable."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError:
+        return None
+    name = result.stdout.strip()
+    if not name or name == "HEAD":
+        return None
+    return name
 
 
 def _index_is_clean(repo: Path) -> bool:
