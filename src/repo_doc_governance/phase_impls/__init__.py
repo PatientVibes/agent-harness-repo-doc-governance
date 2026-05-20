@@ -1,32 +1,19 @@
 """Per-phase implementations.
 
-Imported by `phases.py` to populate `PHASE_DISPATCH`. Each module exposes a
-single `run(state: RunState) -> RunState` function.
+Each module exposes a single `run(state: RunState) -> RunState` function.
+`phases.py:_build_dispatch()` is the single entry point that resolves
+the per-phase callables — it lazy-imports each module as needed.
 
-PR #3 lands the deterministic phases (1, 2, 3, 7, 8 Tier-1). LLM phases
-(4, 5, 6), PR-creation (9), and Tier-2 verification land in later PRs.
+This module's `__init__.py` deliberately does NOT eagerly import the
+phase modules. Eager imports here caused a circular import surfaced
+when `pytest tests/test_safety_invariants.py` ran in isolation:
+
+  test → safety.py → phase_impls.__init__ → phase_impls.agent_instructions
+       → state.py → phases.py → _build_dispatch() → phase_impls.code_first
+       → state.py (still partially initialized) → ImportError.
+
+Letting `_build_dispatch()` be the only entry point that triggers the
+imports breaks the cycle — when `safety.py` imports `_utils`, only the
+small `_utils` module loads; the heavier phase modules load on the
+orchestrator path where `state.py` is already fully initialized.
 """
-
-from repo_doc_governance.phase_impls import (
-    agent_instructions,
-    code_first,
-    drift_audit,
-    handoff,
-    pr_handoff,
-    readme,
-    stale_artifacts,
-    survey,
-    verification,
-)
-
-__all__ = [
-    "survey",
-    "code_first",
-    "drift_audit",
-    "readme",
-    "agent_instructions",
-    "handoff",
-    "stale_artifacts",
-    "verification",
-    "pr_handoff",
-]
