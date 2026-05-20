@@ -43,8 +43,13 @@ Three runtime modes:
 ```bash
 uv pip install -e ".[dev]"
 repo-doc-gov --version
-pytest
+pytest                          # default suite (unit + safety; skips integration)
+pytest -m integration           # opt-in real-LLM tests (requires API key, see Environment variables)
 ```
+
+Integration tests dispatch real LLM calls — they self-skip when no
+`OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY` is in the environment.
+Typical cost is under $0.05 per run with Haiku 4.5.
 
 ## Dependencies
 
