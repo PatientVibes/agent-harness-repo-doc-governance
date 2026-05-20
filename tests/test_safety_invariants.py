@@ -161,6 +161,70 @@ def test_phase9_no_change_short_circuits_cleanly(tmp_path: Path):
     assert _commit_count(repo, "main") == 1
 
 
+def test_phase9_force_recreates_stale_local_branch(tmp_path: Path, capsys):
+    """When the local feature branch already exists (e.g. from a prior
+    failed Phase 9 run that crashed between branch creation and PR
+    open), the next run must force-delete and re-create the branch
+    rather than failing on `git checkout -b`. Surfaced twice during
+    the v0.1.2 real-LLM dogfood.
+    """
+    from repo_doc_governance import pr_builder
+
+    repo = tmp_path / "repo"
+    _init_repo(
+        repo,
+        {
+            "README.md": "# x\n",
+            "package.json": json.dumps(
+                {"name": "x", "version": "0.0.1", "scripts": {"test": "echo ok"}}
+            ),
+        },
+        branch="main",
+    )
+
+    # Bare-local "origin" so the push step has somewhere to go.
+    bare = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", str(bare)],
+        cwd=str(repo), check=True,
+    )
+
+    pr_handoff_phase.set_pr_creator(NullPRCreator())
+    llm_runtime.set_runner(StubLLMRunner(text="# x\n\nupdated\n"))
+
+    state = make_run_state(repo, Task.FULL_PASS)
+    state.execute_phase9 = True
+    state.base_branch = "main"
+
+    survey.run(state)
+    code_first.run(state)
+    drift_audit.run(state)
+    state.readme_proposed = "# x\n\nupdated body\n"
+    stale_artifacts.run(state)
+    verification.run(state)
+
+    # Pre-create the would-be feature branch. The branch name is
+    # deterministic from `state.branch_prefix` + today's date + the
+    # task, so we can compute it the same way pr_builder will.
+    expected_branch = pr_builder.build_pr_plan(state).branch_name
+    subprocess.run(
+        ["git", "branch", expected_branch],
+        cwd=str(repo), check=True,
+    )
+
+    # Phase 9 must NOT raise on the pre-existing branch — it should
+    # detect the staleness, force-delete, log a warning, and recreate.
+    pr_handoff.run(state)
+
+    assert _current_branch(repo) == expected_branch
+    captured = capsys.readouterr()
+    assert "already exists" in captured.err, (
+        f"Expected stale-branch warning on stderr, got: {captured.err!r}"
+    )
+    assert expected_branch in captured.err
+
+
 def test_phase9_does_not_commit_to_main_when_executed(tmp_path: Path):
     """End-to-end: with execute_phase9=True, Phase 9 must end on a
     feature branch and `main` must have its original commit count."""

@@ -22,6 +22,7 @@ Safety invariants enforced here (`safety.py`):
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 from repo_doc_governance import pr_builder, safety
@@ -73,7 +74,11 @@ def _execute_plan(state: RunState, plan: pr_builder.PRPlan) -> None:
             f"Feature branch name collides with base branch '{plan.base_branch}'."
         )
 
-    # 2) Create feature branch off the current HEAD.
+    # 2) Create feature branch off the current HEAD. If a stale local
+    #    branch with the same name exists (e.g. from a prior failed
+    #    Phase 9 run that crashed between branch creation and PR open),
+    #    force-delete it first so `checkout -b` does not exit 128.
+    _delete_stale_local_branch_if_present(repo, plan.branch_name, state)
     _git(repo, "checkout", "-b", plan.branch_name)
 
     # 3) Apply file writes (safety: path-inside-repo).
@@ -132,6 +137,40 @@ def _execute_plan(state: RunState, plan: pr_builder.PRPlan) -> None:
         body=plan.pr_body,
     )
     state.pr_url = pr_url
+
+
+def _delete_stale_local_branch_if_present(
+    repo: Path, branch_name: str, state: RunState
+) -> None:
+    """If `branch_name` already exists locally, force-delete it before
+    `git checkout -b` collides. Surfaced twice during the v0.1.2
+    real-LLM dogfood (a failed PR-creation step leaves the branch in
+    place; the next run's checkout fails with exit 128).
+
+    The cleanup is visible to the operator: a one-line stderr warning
+    plus a `phase9_stale_branch_deleted` trace event when tracing is
+    enabled.
+    """
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch_name}"],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return
+    print(
+        f"warning: local branch '{branch_name}' already exists "
+        f"(likely from a prior failed Phase 9 run). Force-deleting "
+        f"before re-creating.",
+        file=sys.stderr,
+    )
+    if state.pipeline_trace is not None:
+        state.pipeline_trace.event(
+            "phase9_stale_branch_deleted",
+            branch=branch_name,
+        )
+    _git(repo, "branch", "-D", branch_name)
 
 
 def _index_is_clean(repo: Path) -> bool:
