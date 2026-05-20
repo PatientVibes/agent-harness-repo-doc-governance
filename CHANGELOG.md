@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0] — 2026-05-19
+
+### Added (PR #6 — feature-complete release)
+- CLI subcommands: `run` (manual mode — opens a PR), `audit`
+  (read-only — JSON output, no PR), `batch` (multi-repo with bounded
+  concurrency). `run` and `audit` share the same deterministic engine;
+  `audit` stops after Phase 8 Tier-1 and never invokes Phase 4/5/6
+  (LLM) or Phase 9 (PR creation) — verified by a test that asserts the
+  `StubLLMRunner` has zero recorded calls under `audit`.
+- FastAPI HTTP routes in `src/repo_doc_governance/app.py`: `POST /run`,
+  `POST /audit`, `GET /health`. Mirror the CLI semantics. No auth
+  baked in — production deployments front this with their platform's
+  access control.
+- Claude Code subagent at
+  `agent-skills/plugins/repo-documentation-governance/agents/repo-documentation-governance.md`
+  rewritten as a thin wrapper around the harness CLI. The subagent's
+  job is now to (1) run `repo-doc-gov audit` and show the drift report,
+  (2) on user approval, run `repo-doc-gov run --execute`, (3) surface
+  the PR URL + `Needs verification` items. The workflow rules + safety
+  invariants are now enforced by the harness; the subagent body
+  describes the harness's contract.
+- Catalog refresh: `D:/ai-agents/CLAUDE.md` 12-Component Harness
+  sentence now lists `agent-harness-repo-doc-governance` as the fourth
+  example; `D:/ai-agents/CLAUDE.md` Sibling repos table adds a row;
+  `D:/ai-agents/README.md` Agents table updates the row from
+  `v0.1.0-rc` to `v0.1.0` and marks the spec status `implemented`.
+- Spec status flipped from `draft` → `implemented` at
+  `D:/ai-agents/docs/superpowers/specs/2026-05-19-agent-harness-repo-doc-governance-design.md`.
+- Retrospective added to `D:/ai-agents/CONTRIBUTING.md` per the
+  catalog convention.
+- Version bumped to `0.1.0` (from `0.1.0-rc`) in `pyproject.toml` and
+  `__init__.py`. 103+ tests pass.
+
 ## [Unreleased]
 
 ### Added (PR #5)
