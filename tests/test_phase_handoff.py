@@ -64,6 +64,31 @@ def test_handoff_phase_passes_drift_findings_for_handoff_files(tmp_path: Path):
     assert "stale_todo" in stub.calls[0]["user_prompt"]
 
 
+def test_phase6_strips_llm_preamble(tmp_path: Path):
+    """Surfaced in v0.1.3 dogfood (#27): Sonnet 4.6 emits "Now I have a
+    thorough understanding..." chain-of-thought prose above the first H1
+    of the HANDOFF body. The phase must defensively strip it.
+    """
+    repo = build_drifted_repo(tmp_path)
+    state = make_run_state(repo, Task.FULL_PASS)
+    survey.run(state)
+    drift_audit.run(state)
+
+    leaked = (
+        "Now I have a thorough understanding of the repository. "
+        "Let me write the HANDOFF file.\n\n"
+        "# Handoff\n\nUpdated body.\n"
+    )
+    llm_runtime.set_runner(StubLLMRunner(text=leaked))
+    handoff.run(state)
+
+    assert state.handoff_proposed.startswith("# Handoff"), (
+        f"Phase 6 did not strip the preamble. Output starts with: "
+        f"{state.handoff_proposed[:120]!r}"
+    )
+    assert "Now I have a thorough" not in state.handoff_proposed
+
+
 def test_phase6_includes_current_handoff_content(tmp_path: Path):
     """Load-bearing — the LLM must see the EXISTING HANDOFF/TODO/ROADMAP
     file content so it can honor the "preserve every TODO" rule. Without

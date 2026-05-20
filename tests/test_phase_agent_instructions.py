@@ -92,6 +92,31 @@ def test_phase5_wrapper_template_is_deterministic(tmp_path: Path):
     )
 
 
+def test_phase5_strips_llm_preamble(tmp_path: Path):
+    """Surfaced in v0.1.3 dogfood (#27): Sonnet 4.6 emits chain-of-thought
+    prose above the first H1 of the canonical agent file. The phase must
+    defensively strip the preamble.
+    """
+    repo = build_agents_and_claude_repo(tmp_path)
+    state = make_run_state(repo, Task.FULL_PASS)
+    survey.run(state)
+
+    leaked = (
+        "Now I have a thorough understanding of the repo. The manifests "
+        "declare no runnable commands directly...\n\n"
+        "# Agent instructions\n\nConsolidated body.\n"
+    )
+    llm_runtime.set_runner(StubLLMRunner(text=leaked))
+    agent_instructions.run(state)
+
+    canonical_body = state.agent_files_proposed.get("AGENTS.md", "")
+    assert canonical_body.startswith("# Agent instructions"), (
+        f"Phase 5 did not strip the preamble. Body starts with: "
+        f"{canonical_body[:120]!r}"
+    )
+    assert "Now I have a thorough" not in canonical_body
+
+
 def test_phase5_includes_current_agent_file_content(tmp_path: Path):
     """Load-bearing — the LLM must see the EXISTING agent file content so
     it can honor the preserve-existing-content rule. Without this, the LLM
