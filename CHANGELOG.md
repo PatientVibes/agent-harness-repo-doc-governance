@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] — 2026-05-20
+
+### Added (Phase 4 prompt tightening + Phase 9 no-change handling)
+
+First real-LLM end-to-end run (Gemini 2.5 Pro via OpenRouter against
+`agent-tool-pdf-builder`) surfaced both fixes.
+
+- **Phase 4 user prompt now includes the current README content
+  verbatim** under a "CURRENT README CONTENT (preserve all of this
+  unless flagged as drift)" header. Without this the LLM was asked to
+  "update" a doc it had never seen and fell back to writing from the
+  template skeleton — the "rewriting for tone only" anti-pattern that
+  `prompts/decisions.md` warns against.
+- **Phase 4 system prompt rewritten with seven explicit hard rules**:
+  preserve-existing-content (unless drift-flagged), no-title-renames,
+  omit-empty-sections (no `Needs verification` filler), manifest-
+  faithful commands (no inventing `pip install` for `uv` projects),
+  cross-repo references are content (not boilerplate), `Needs
+  verification` items survive as `Needs verification` items, raw
+  markdown output only.
+- **Phase 9 no-change short-circuit**: when the LLM proposes content
+  byte-identical to disk (the correct behavior when there's no drift
+  to fix), Phase 9 detects an empty index and returns with `pr_url=None`
+  instead of failing on `git commit`. `state.pr_branch_name` is still
+  recorded for inspection. Verified against pdf-builder: the prior
+  `--execute` run crashed at `git commit`; same input now exits cleanly
+  with no PR opened.
+- Tests: `test_readme_phase_includes_current_readme_content` gates the
+  load-bearing user-prompt fix; `test_phase9_no_change_short_circuits_cleanly`
+  exercises the Phase 9 no-change path end-to-end against a tmp_path
+  git repo. 117 tests total.
+
 ## [0.1.1] — 2026-05-20
 
 ### Added (CI gate rollout)

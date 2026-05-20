@@ -100,7 +100,17 @@ def _execute_plan(state: RunState, plan: pr_builder.PRPlan) -> None:
     # 6) Final pre-commit safety: branch is not base / not protected.
     safety.assert_committing_to_feature_branch(repo, base_branch=plan.base_branch)
 
-    # 7) Commit. Use a config-scoped author so the commit succeeds even if
+    # 7) No-change short-circuit. If the LLM phases produced output that
+    #    matches the on-disk content (e.g. the README had no drift and
+    #    the prompt's "preserve" rule landed an identical body), there's
+    #    nothing to commit and `git commit` would exit non-zero. That is
+    #    success, not failure — record it and return without opening a PR.
+    if _index_is_clean(repo):
+        state.pr_url = None
+        state.pr_branch_name = plan.branch_name  # branch was created; left in place for inspection
+        return
+
+    # 8) Commit. Use a config-scoped author so the commit succeeds even if
     #    the repo has no global git identity (CI environments).
     _git(
         repo,
@@ -110,10 +120,10 @@ def _execute_plan(state: RunState, plan: pr_builder.PRPlan) -> None:
         "-m", plan.pr_title,
     )
 
-    # 8) Push (best-effort — caller decides if this is allowed).
+    # 9) Push (best-effort — caller decides if this is allowed).
     _git(repo, "push", "-u", "origin", plan.branch_name)
 
-    # 9) Open PR. NEVER calls `gh pr merge` — only `gh pr create`.
+    # 10) Open PR. NEVER calls `gh pr merge` — only `gh pr create`.
     pr_url = get_pr_creator().create(
         repo=repo,
         branch=plan.branch_name,
@@ -122,6 +132,21 @@ def _execute_plan(state: RunState, plan: pr_builder.PRPlan) -> None:
         body=plan.pr_body,
     )
     state.pr_url = pr_url
+
+
+def _index_is_clean(repo: Path) -> bool:
+    """True iff `git diff --cached --quiet` reports no staged changes.
+
+    Lets the no-drift case return success without creating a PR.
+    """
+    result = subprocess.run(
+        ["git", "diff", "--cached", "--quiet"],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+    )
+    # `git diff --quiet` exits 0 iff there are NO differences.
+    return result.returncode == 0
 
 
 def _git(repo: Path, *args: str) -> None:

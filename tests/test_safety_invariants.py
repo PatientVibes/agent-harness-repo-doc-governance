@@ -125,6 +125,42 @@ def test_assert_committing_to_feature_branch_accepts_feature_branch(tmp_path: Pa
     )
 
 
+def test_phase9_no_change_short_circuits_cleanly(tmp_path: Path):
+    """If the LLM proposes content identical to disk (the no-drift case
+    surfaced by the first real-LLM run), Phase 9 must NOT fail. It should
+    create the feature branch, find a clean index, and return with
+    `pr_url=None` (and the branch still in place for inspection).
+    """
+    repo = tmp_path / "repo"
+    _init_repo(
+        repo,
+        {
+            "README.md": "# x\n\nUnchanged body.\n",
+            "package.json": json.dumps({"scripts": {"test": "echo ok"}}),
+        },
+        branch="main",
+    )
+
+    pr_handoff_phase.set_pr_creator(NullPRCreator())
+    state = make_run_state(repo, Task.FULL_PASS)
+    state.execute_phase9 = True
+    state.base_branch = "main"
+    # Set the proposed README to be byte-identical to what's on disk.
+    state.readme_proposed = "# x\n\nUnchanged body.\n"
+
+    survey.run(state)
+    code_first.run(state)
+    drift_audit.run(state)
+    pr_handoff.run(state)
+
+    # No PR was created (no changes to ship).
+    assert state.pr_url is None
+    # But branch_name was recorded so a human can inspect what the harness did.
+    assert state.pr_branch_name is not None
+    # Main has its original commit count (one initial commit from _init_repo).
+    assert _commit_count(repo, "main") == 1
+
+
 def test_phase9_does_not_commit_to_main_when_executed(tmp_path: Path):
     """End-to-end: with execute_phase9=True, Phase 9 must end on a
     feature branch and `main` must have its original commit count."""
