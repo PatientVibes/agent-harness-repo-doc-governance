@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] — 2026-05-20
+
+### Fixed (Phase 9 stale-branch edge case: HEAD on the stale branch)
+
+The v0.1.3 stale-branch fix (PR #23, closing #15) handles the case
+where a stale local feature branch from a prior failed run blocks
+the next `git checkout -b`. It force-deletes via `git branch -D`.
+
+But `git branch -D` refuses to delete the current HEAD. Surfaced in
+the v0.1.4 dogfood retry against `agent-harness-card-extractor`:
+the previous run left HEAD on the feature branch, `gh pr close
+--delete-branch` cleaned only the remote, and the next run errored
+at `git branch -D` with `CalledProcessError` exit 1. Closes #32
+(PR #35).
+
+- `_delete_stale_local_branch_if_present` now takes `base_branch`.
+  When HEAD is on the stale branch, it runs `git checkout <base>`
+  first via the new `_git_current_branch` helper. The next step
+  would `checkout -b` off `<base>` anyway — matches natural flow.
+
+### Test count
+
+140 tests + 1 opt-in `-m integration` test. Was 139 in v0.1.4.
+
 ## [0.1.4] — 2026-05-20
 
 Two bugs surfaced by the v0.1.3 real-LLM dogfood against
