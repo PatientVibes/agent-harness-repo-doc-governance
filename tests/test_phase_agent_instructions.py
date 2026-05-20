@@ -92,6 +92,30 @@ def test_phase5_wrapper_template_is_deterministic(tmp_path: Path):
     )
 
 
+def test_phase5_includes_current_agent_file_content(tmp_path: Path):
+    """Load-bearing — the LLM must see the EXISTING agent file content so
+    it can honor the preserve-existing-content rule. Without this, the LLM
+    falls back to writing from the template skeleton (the "rewriting for
+    tone only" anti-pattern Phase 4 had pre-v0.1.2).
+    """
+    repo = build_agents_and_claude_repo(tmp_path)
+    state = make_run_state(repo, Task.FULL_PASS)
+    survey.run(state)
+
+    stub = StubLLMRunner(text="# Agent instructions\n\nConsolidated body.\n")
+    llm_runtime.set_runner(stub)
+    agent_instructions.run(state)
+
+    user_prompt = stub.calls[0]["user_prompt"]
+    assert "CURRENT AGENT-INSTRUCTION FILES" in user_prompt
+    # The fixture's AGENTS.md body — must survive verbatim into the prompt.
+    assert "Do not commit to main" in user_prompt
+    # The fixture's CLAUDE.md body — must survive verbatim into the prompt.
+    assert "Always run tests" in user_prompt
+    # And the explicit "preserve all content unless flagged" instruction.
+    assert "preserve" in user_prompt.lower()
+
+
 def test_phase5_no_agent_files_creates_canonical_from_scratch(tmp_path: Path):
     repo = build_clean_repo(tmp_path)
     # Remove README so agent_files is effectively empty for the agent
