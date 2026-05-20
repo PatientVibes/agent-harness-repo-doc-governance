@@ -32,6 +32,10 @@ runs/
 checkpoints/
 *.trace.jsonl
 
+# Local pre-push pr-reviewer artifacts
+.pr-review/
+.pr-review-log.txt
+
 # Local hardlinks to CLAUDE.md (re-link manually after Edit-tool replaces)
 AGENTS.md
 GEMINI.md

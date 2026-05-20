@@ -86,7 +86,10 @@ def phases_for_task(task: Task) -> list[Phase]:
     return list(TASK_TO_PHASES[task])
 
 
-# --- Phase implementations are stubs in PR #2. Real implementations land in PR #3-#5.
+# --- Phase implementations.
+#
+# PR #3 lands the deterministic phases (1, 2, 3, 7, 8 Tier-1). The remaining
+# phases stay as `NotImplementedError` stubs until their PR lands.
 
 def _phase_not_implemented(phase: Phase) -> PhaseFn:
     """Return a phase function that raises NotImplementedError with a clear message."""
@@ -101,4 +104,25 @@ def _phase_not_implemented(phase: Phase) -> PhaseFn:
     return _run
 
 
-PHASE_DISPATCH: dict[Phase, PhaseFn] = {p: _phase_not_implemented(p) for p in Phase}
+def _build_dispatch() -> dict[Phase, PhaseFn]:
+    # Imported lazily to keep `phases.py` free of state.py / models.py
+    # imports at top level (avoids the circular import that would
+    # otherwise form once state.py imports from this module).
+    from repo_doc_governance.phase_impls import (
+        code_first,
+        drift_audit,
+        stale_artifacts,
+        survey,
+        verification,
+    )
+
+    dispatch: dict[Phase, PhaseFn] = {p: _phase_not_implemented(p) for p in Phase}
+    dispatch[Phase.SURVEY] = survey.run
+    dispatch[Phase.CODE_FIRST] = code_first.run
+    dispatch[Phase.DRIFT_AUDIT] = drift_audit.run
+    dispatch[Phase.STALE_ARTIFACTS] = stale_artifacts.run
+    dispatch[Phase.VERIFICATION] = verification.run
+    return dispatch
+
+
+PHASE_DISPATCH: dict[Phase, PhaseFn] = _build_dispatch()

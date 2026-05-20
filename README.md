@@ -6,11 +6,17 @@ consolidation. Ports the Claude Code `repo-documentation-governance` subagent
 into a CLI / HTTP / batch-runnable form for CI, cron, webhooks, and unattended
 sweeps. Outputs a Pull Request — does NOT merge. 12-component agent harness.
 
-## Status: v0.1.0-rc (scaffold only)
+## Status: v0.1.0-rc (deterministic phases landed in PR #3)
 
-This is the PR-#1 scaffold. None of the workflow phases are implemented yet.
-See the [design spec](https://github.com/PatientVibes/ai-agents/blob/master/docs/superpowers/specs/2026-05-19-agent-harness-repo-doc-governance-design.md)
-for the 6-PR landing plan; status flips to `v0.1.0` when PR #6 lands.
+PRs #1–#3 have landed:
+- PR #1 — repo scaffold
+- PR #2 — vendored prompts + orchestrator skeleton + `make re-vendor` / `verify-no-local-edits`
+- PR #3 — deterministic phases (1, 2, 3, 7, 8 Tier-1)
+
+Remaining: PR #4 (LLM phases 4/5/6), PR #5 (PR creation + safety-invariant
+integration tests), PR #6 (modes + subagent wrapper + catalog refresh).
+Status flips to `v0.1.0` when PR #6 lands. See the
+[design spec](https://github.com/PatientVibes/ai-agents/blob/master/docs/superpowers/specs/2026-05-19-agent-harness-repo-doc-governance-design.md).
 
 ## What it does (when complete)
 
@@ -62,15 +68,15 @@ Three PatientVibes tools are pulled from GitHub via `[tool.uv.sources]` in `pypr
 | Component | Implementation |
 |---|---|
 | Orchestration | Plain Python sequential pipeline (`src/repo_doc_governance/orchestrator.py`) with Pydantic `RunState`; phase-skip list-filter from `task` parameter (`Task` enum → `TASK_TO_PHASES`). Per-phase exception isolation — one phase failing does NOT abort the rest. No custom LangGraph StateGraph; matches `agent-harness-card-extractor` precedent. |
-| Tools | *(PR #3+)* Git ops (`git ls-files`, `git status`, `git blame`), file ops (Read / Write / Edit / Glob / Grep), classification rules, PR creation via `gh` |
-| Memory | Per-run `RunState` Pydantic model (`src/repo_doc_governance/state.py`) carrying inventory, drift findings, stale-artifact candidates, verification results, per-phase diffs, PR body draft. No cross-run memory — each repo run is independent. Cross-process checkpoint saving (`agent_tool_llm_utils.save_checkpoint`) wires up in PR #3. |
+| Tools | Git ops (`git ls-files`, `git status`, `git rev-parse`, `git ls-files --others --exclude-standard`, `git ls-files --error-unmatch`); manifest parsers (npm scripts, Makefile targets, `pyproject` scripts). PR creation via `gh` lands in PR #5. |
+| Memory | Per-run `RunState` Pydantic model (`src/repo_doc_governance/state.py`) carrying typed `Inventory` / `CodeFirstMap` / `DriftFinding[]` / `StaleCandidate[]` / `VerificationResult[]` + per-phase diffs + PR body draft. No cross-run memory — each repo run is independent. Cross-process checkpoint saving (`agent_tool_llm_utils.save_checkpoint`) wires up in PR #4. |
 | Context mgmt | *(PR #4)* Phase-scoped LLM context; only Phase 5 (agent-instruction consolidation) loads all AGENTS / CLAUDE / GEMINI / Copilot files together |
 | Prompt construction | Skill body + `phases.md` + `decisions.md` + `templates.md` vendored from `agent-skills/plugins/repo-documentation-governance/` at a pinned SHA into `src/repo_doc_governance/prompts/`. Every vendored file carries `<!-- DO NOT EDIT — vendored from … @ <SHA>. Edit upstream + re-vendor. -->` on line 1. Refresh via `make re-vendor`. |
-| Output parsing | *(PR #3+)* Pydantic models for inventory, findings, classifications, PR body |
-| State | `RunState` Pydantic model is the in-process state; `phases_completed` / `phases_failed` / `started_at` / `completed_at` track execution metadata. Cross-process checkpoint-and-resume via `agent_tool_llm_utils.save_checkpoint` lands in PR #3. |
-| Error handling | *(PR #3+)* `agent_tool_llm_utils.retry_async` with `not is_transient(...)` fatal classifier; per-phase exception isolation (one phase fails → mark and continue, PR notes the skip) |
-| Guardrails | *(PR #5)* Input sanitization; refuse-list enforcement on Phase 8 Tier-2 command execution; `git ls-files --error-unmatch` check before delete |
-| Verification | *(PR #4)* Tier-1 read-only (paths exist, links resolve, commands defined); Tier-2 best-effort command execution behind refuse-list; one retry per phase via the `verification-retry-loop` skill pattern |
+| Output parsing | Pydantic models in `src/repo_doc_governance/models.py` — `Inventory`, `CodeFirstMap`, `DriftFinding`, `StaleCandidate`, `VerificationResult`. The `Classification` enum (`Keep / Update / Consolidate / Archive / Delete / Needs verification`) is the contract from `prompts/decisions.md`. |
+| State | `RunState` Pydantic model is the in-process state; `phases_completed` / `phases_failed` / `started_at` / `completed_at` track execution metadata. Cross-process checkpoint-and-resume via `agent_tool_llm_utils.save_checkpoint` lands in PR #4. |
+| Error handling | Per-phase exception isolation — `NotImplementedError` from a not-yet-landed phase is caught, recorded as a `PhaseFailure`, and the orchestrator continues. `agent_tool_llm_utils.retry_async` for LLM phases lands in PR #4. |
+| Guardrails | *(PR #5)* Refuse-list enforcement on Phase 8 Tier-2 command execution; `git ls-files --error-unmatch` check before delete (already in Phase 7 candidate classification — `Needs verification` rather than `Delete` for untracked files). |
+| Verification | Tier-1 read-only checks landed in PR #3 — `path_exists`, `internal_link_resolves`, `command_declared` results recorded as typed `VerificationResult`. Tier-2 best-effort command execution behind refuse-list lands in PR #5. |
 | Subagent orchestration | *(PR #6)* Monorepo case spawns per-package mini-runs (semaphore-bounded); batch mode parallelizes across repos |
 | Token tracking | *(PR #4)* `agent_tool_token_tracker.TokenTracker` records every LLM call source / phase / model / tokens / latency / cost |
 

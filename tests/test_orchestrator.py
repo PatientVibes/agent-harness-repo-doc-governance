@@ -100,8 +100,13 @@ def test_make_run_state_rejects_invalid_task(tmp_path: Path):
 
 def test_run_state_default_collections_are_empty(tmp_path: Path):
     state = make_run_state(tmp_path, Task.FULL_PASS)
-    assert state.inventory == {}
+    # Typed phase outputs default to None until their phase runs;
+    # findings/results lists default empty.
+    assert state.inventory is None
+    assert state.code_first_map is None
     assert state.drift_findings == []
+    assert state.stale_artifact_candidates == []
+    assert state.verification_results == []
     assert state.phases_completed == []
     assert state.phases_failed == []
     assert state.pr_body_draft == ""
@@ -110,19 +115,44 @@ def test_run_state_default_collections_are_empty(tmp_path: Path):
 # ---- run() exception-handling path -----------------------------------------
 
 
-def test_run_records_every_phase_as_failed_in_pr2(tmp_path: Path):
-    """In PR #2 every phase stub raises NotImplementedError, so every
-    selected phase ends up in `phases_failed`. The orchestrator must
-    continue to the next phase rather than aborting on the first failure.
+def test_run_after_pr3_completes_deterministic_phases(tmp_path: Path):
+    """PR #3 lands the deterministic phases (1, 2, 3, 7, 8 Tier-1).
+    For README_ONLY ([CODE_FIRST, README, PR_HANDOFF]), CODE_FIRST is now
+    deterministic and should complete; README and PR_HANDOFF stay stubs
+    and end up in `phases_failed`. The orchestrator must continue past
+    failures.
     """
     state = make_run_state(tmp_path, Task.README_ONLY)
     result = run(state)
 
-    assert len(result.phases_failed) == 3
+    assert result.phases_completed == [Phase.CODE_FIRST]
     failed_phases = [f.phase for f in result.phases_failed]
-    assert failed_phases == [Phase.CODE_FIRST, Phase.README, Phase.PR_HANDOFF]
-    assert result.phases_completed == []
+    assert failed_phases == [Phase.README, Phase.PR_HANDOFF]
     assert all(f.error_type == "NotImplementedError" for f in result.phases_failed)
+
+
+def test_drift_sweep_after_pr3_all_deterministic_phases_complete(tmp_path: Path):
+    """DRIFT_SWEEP runs SURVEY, DRIFT_AUDIT, STALE_ARTIFACTS, VERIFICATION,
+    PR_HANDOFF. The first four are deterministic (PR #3); only PR_HANDOFF
+    is still a stub."""
+    # Make tmp_path look like an empty git repo so the deterministic
+    # phases have something to run against.
+    import subprocess
+    subprocess.run(["git", "init", "-q"], cwd=str(tmp_path), check=True)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "--allow-empty", "-m", "init", "-q"],
+                   cwd=str(tmp_path), check=True)
+
+    state = make_run_state(tmp_path, Task.DRIFT_SWEEP)
+    result = run(state)
+
+    assert Phase.SURVEY in result.phases_completed
+    assert Phase.DRIFT_AUDIT in result.phases_completed
+    assert Phase.STALE_ARTIFACTS in result.phases_completed
+    assert Phase.VERIFICATION in result.phases_completed
+
+    failed_phases = [f.phase for f in result.phases_failed]
+    assert failed_phases == [Phase.PR_HANDOFF]
 
 
 def test_run_records_timestamps(tmp_path: Path):
@@ -139,10 +169,16 @@ def test_run_records_timestamps(tmp_path: Path):
 def test_run_continues_past_first_failure(tmp_path: Path):
     """Specifically the defensive behavior — one phase failing must not
     short-circuit the remaining phases."""
+    import subprocess
+    subprocess.run(["git", "init", "-q"], cwd=str(tmp_path), check=True)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "--allow-empty", "-m", "init", "-q"],
+                   cwd=str(tmp_path), check=True)
+
     state = make_run_state(tmp_path, Task.FULL_PASS)
     result = run(state)
 
-    # All 9 phases attempted (all failed in PR #2, but ATTEMPTED is what matters).
+    # All 9 phases attempted. PR #3 = 5 deterministic complete, 4 stub fail.
     assert len(result.phases_failed) + len(result.phases_completed) == 9
 
 

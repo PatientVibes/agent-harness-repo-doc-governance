@@ -1,17 +1,23 @@
 """RunState — the per-run Pydantic model that carries data across phases.
 
-State is in-process; serialization for checkpoint-and-resume lands in PR #3
-once `agent_tool_llm_utils.save_checkpoint` is wired up.
+State is in-process; serialization for checkpoint-and-resume lands later
+via `agent_tool_llm_utils.save_checkpoint`.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from pydantic import BaseModel, Field
 
+from repo_doc_governance.models import (
+    CodeFirstMap,
+    DriftFinding,
+    Inventory,
+    StaleCandidate,
+    VerificationResult,
+)
 from repo_doc_governance.phases import Phase, Task
 
 
@@ -26,17 +32,15 @@ class PhaseFailure(BaseModel):
 class RunState(BaseModel):
     """Per-run state passed through the phase pipeline.
 
-    Phase implementations mutate this object (or return a new copy) to
-    accumulate inventory, findings, classifications, and the eventual PR
-    body. Field shapes will tighten as phases land — they are intentionally
-    loose (`dict`, `list[dict]`) in PR #2 so the skeleton can compile and be
-    tested without pinning the exact internal schemas.
+    Phase implementations mutate this object in place to accumulate
+    inventory, findings, classifications, and the eventual PR body.
     """
 
     # --- Inputs (set at construction; immutable during run) ----------------
 
     target_repo: Path
-    """Path to the repo being analyzed. Must be a git working tree."""
+    """Path to the repo being analyzed. Must be a git working tree for
+    Phase 1's `git ls-files` step to populate `tracked_files`."""
 
     task: Task
     """Which task type drove this run; determines `phases_to_run`."""
@@ -46,23 +50,23 @@ class RunState(BaseModel):
 
     # --- Outputs (populated phase-by-phase) --------------------------------
 
-    inventory: dict[str, Any] = Field(default_factory=dict)
-    """Phase 1 output — tracked files, directories, package manifests, doc files."""
+    inventory: Inventory | None = None
+    """Phase 1 output."""
 
-    code_first_map: dict[str, Any] = Field(default_factory=dict)
-    """Phase 2 output — manifests/CI/entry-points → declared commands and paths."""
+    code_first_map: CodeFirstMap | None = None
+    """Phase 2 output."""
 
-    drift_findings: list[dict[str, Any]] = Field(default_factory=list)
-    """Phase 3 output — each finding has `path`, `kind`, `severity`, `classification`."""
+    drift_findings: list[DriftFinding] = Field(default_factory=list)
+    """Phase 3 output."""
 
-    stale_artifact_candidates: list[dict[str, Any]] = Field(default_factory=list)
-    """Phase 7 output — candidate files for deletion or archive."""
+    stale_artifact_candidates: list[StaleCandidate] = Field(default_factory=list)
+    """Phase 7 output."""
 
-    verification_results: list[dict[str, Any]] = Field(default_factory=list)
-    """Phase 8 output — read-only checks (Tier 1) + optional execution (Tier 2)."""
+    verification_results: list[VerificationResult] = Field(default_factory=list)
+    """Phase 8 Tier-1 output. Tier-2 (command execution) lands in PR #5."""
 
     readme_diff: str = ""
-    """Phase 4 output — unified diff for README.md (empty if Phase 4 didn't run)."""
+    """Phase 4 output — unified diff for README.md."""
 
     agent_files_diff: str = ""
     """Phase 5 output — unified diff for the agent-instruction files."""
@@ -72,6 +76,10 @@ class RunState(BaseModel):
 
     pr_body_draft: str = ""
     """Phase 9 output — the final PR body markdown that gets sent to `gh pr create`."""
+
+    canonical_agent_file: str | None = None
+    """Phase 5 decision — which agent-instruction file is canonical
+    (default `AGENTS.md`; `CLAUDE.md` for Claude-first repos)."""
 
     # --- Execution metadata -----------------------------------------------
 
