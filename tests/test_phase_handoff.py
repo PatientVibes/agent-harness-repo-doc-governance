@@ -113,6 +113,62 @@ def test_phase6_includes_current_handoff_content(tmp_path: Path):
     assert "explicit decision" in user_prompt.lower() or "preserve" in user_prompt.lower()
 
 
+def test_phase6_filters_aspirational_docs_from_prompt(tmp_path: Path):
+    """Surfaced in v0.1.3 dogfood (#28): card-extractor's huge plan
+    docs under `docs/superpowers/plans/` were inlined into the Phase 6
+    prompt, producing 728K input tokens (cost: $2.18 for one phase
+    call with Sonnet 4.6). Plan/spec docs describe future / proposed
+    state — the inverse of what HANDOFF describes. They must be
+    FILTERED OUT of the Phase 6 input.
+    """
+    import json
+    import subprocess
+
+    repo = tmp_path / "asp"
+    repo.mkdir()
+    (repo / "README.md").write_text("# asp-fixture\n", encoding="utf-8")
+    (repo / "package.json").write_text(
+        json.dumps({"name": "asp", "version": "0.0.1", "scripts": {"test": "echo ok"}}),
+        encoding="utf-8",
+    )
+    plan_dir = repo / "docs" / "superpowers" / "plans"
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "2026-05-20-frontend-plan.md").write_text(
+        "# Frontend plan\n\nPLAN_BODY_THAT_MUST_NOT_LEAK_INTO_PHASE_6 — "
+        "this is aspirational plan content describing future state.\n",
+        encoding="utf-8",
+    )
+    (repo / "docs").mkdir(parents=True, exist_ok=True)
+    (repo / "docs" / "HANDOFF.md").write_text(
+        "# Handoff\n\n## Next tasks\n\n"
+        "- [ ] HANDOFF_BODY_THAT_MUST_APPEAR_IN_PROMPT — real current state.\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=str(repo), check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=str(repo), check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=str(repo), check=True)
+    subprocess.run(["git", "add", "."], cwd=str(repo), check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "i"], cwd=str(repo), check=True)
+
+    state = make_run_state(repo, Task.FULL_PASS)
+    survey.run(state)
+    drift_audit.run(state)
+
+    stub = StubLLMRunner(text="# Handoff\n\nclean.\n")
+    llm_runtime.set_runner(stub)
+    handoff.run(state)
+
+    user_prompt = stub.calls[0]["user_prompt"]
+    # Real handoff body must be inlined.
+    assert "HANDOFF_BODY_THAT_MUST_APPEAR_IN_PROMPT" in user_prompt
+    # Plan body must NOT be inlined — that's the cost regression we're
+    # gating against.
+    assert "PLAN_BODY_THAT_MUST_NOT_LEAK_INTO_PHASE_6" not in user_prompt
+    # And the plan-doc path should not appear as a `### docs/superpowers/plans/...`
+    # header in the CURRENT HANDOFF section.
+    assert "docs/superpowers/plans/2026-05-20-frontend-plan.md" not in user_prompt
+
+
 def test_handoff_phase_empty_response_leaves_diff_empty(tmp_path: Path):
     repo = build_drifted_repo(tmp_path)
     state = make_run_state(repo, Task.FULL_PASS)

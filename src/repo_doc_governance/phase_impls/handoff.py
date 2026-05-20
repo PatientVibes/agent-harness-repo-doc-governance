@@ -20,6 +20,7 @@ from repo_doc_governance.phase_impls._diff import unified_diff
 from repo_doc_governance.phase_impls._llm_output import strip_llm_preamble
 from repo_doc_governance.phase_impls._observability import record_llm_call
 from repo_doc_governance.phase_impls._prompts import load_prompt
+from repo_doc_governance.phase_impls.drift_audit import is_aspirational_doc
 from repo_doc_governance.state import RunState
 
 
@@ -128,14 +129,24 @@ def _build_user_prompt(state: RunState, handoff_target: str) -> str:
     # LLM has no way to honor the "preserve every TODO" rule and falls back
     # to writing from the template skeleton (the "rewriting for tone only"
     # anti-pattern that Phase 4 had pre-v0.1.2).
+    #
+    # Aspirational docs (plan / spec / design / proposal / RFC) are
+    # FILTERED OUT — they describe future / proposed state, which is the
+    # inverse of what HANDOFF describes (actual current state). Without
+    # this filter, big plan-doc-heavy repos balloon the Phase 6 prompt
+    # by orders of magnitude (e.g. 728K input tokens in the v0.1.3
+    # dogfood). See drift_audit.is_aspirational_doc().
+    handoff_sources = [
+        df for df in inv.handoff_files if not is_aspirational_doc(df.path)
+    ]
     parts.append(
         "\n## CURRENT HANDOFF / TODO / ROADMAP FILES "
         "(every TODO item below must appear in your output under an "
         "explicit decision — kept / rewritten / completed / archived / "
         "deleted / Needs verification)"
     )
-    if inv.handoff_files:
-        for df in inv.handoff_files:
+    if handoff_sources:
+        for df in handoff_sources:
             body = _read_file_safely(state.target_repo, df.path)
             parts.append(f"\n### {df.path} ({df.kind.value})")
             parts.append("```markdown")
@@ -154,7 +165,7 @@ def _build_user_prompt(state: RunState, handoff_target: str) -> str:
 
     handoff_findings = [
         f for f in state.drift_findings if any(
-            df.path == f.path for df in inv.handoff_files
+            df.path == f.path for df in handoff_sources
         )
     ]
     if handoff_findings:
