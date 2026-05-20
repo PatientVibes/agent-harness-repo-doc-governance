@@ -177,6 +177,7 @@ def _audit_commands(
     doc: DocFile, text: str, declared: set[str]
 ) -> list[DriftFinding]:
     out: list[DriftFinding] = []
+    is_aspirational = is_aspirational_doc(doc.path)
     for line_no, line in enumerate(text.splitlines(), start=1):
         for tool_name, pattern in _COMMAND_PATTERNS:
             for match in pattern.finditer(line):
@@ -185,20 +186,63 @@ def _audit_commands(
                 # doesn't flag style variations (`npm run test` vs `npm test`).
                 if _command_is_declared(cmd, declared):
                     continue
-                out.append(
-                    DriftFinding(
-                        path=doc.path,
-                        kind="dead_command",
-                        severity=Severity.HIGH,
-                        classification=Classification.UPDATE,
-                        detail=(
-                            f"`{cmd}` is referenced but not declared in any "
-                            f"{tool_name}-flavored manifest."
-                        ),
-                        line=line_no,
+                if is_aspirational:
+                    # Plan / spec / design docs describe future or
+                    # alternative state. A `dead_command` here is usually
+                    # a planned-but-not-yet-shipped reference, not drift.
+                    # Demote to `Needs verification` so the human can
+                    # confirm whether the plan landed or not.
+                    out.append(
+                        DriftFinding(
+                            path=doc.path,
+                            kind="dead_command_in_aspirational_doc",
+                            severity=Severity.LOW,
+                            classification=Classification.NEEDS_VERIFICATION,
+                            detail=(
+                                f"`{cmd}` is referenced in a plan/spec doc but "
+                                f"not declared in any {tool_name}-flavored manifest. "
+                                f"Confirm whether the plan landed."
+                            ),
+                            line=line_no,
+                        )
                     )
-                )
+                else:
+                    out.append(
+                        DriftFinding(
+                            path=doc.path,
+                            kind="dead_command",
+                            severity=Severity.HIGH,
+                            classification=Classification.UPDATE,
+                            detail=(
+                                f"`{cmd}` is referenced but not declared in any "
+                                f"{tool_name}-flavored manifest."
+                            ),
+                            line=line_no,
+                        )
+                    )
     return out
+
+
+_ASPIRATIONAL_PATH_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"(?i)(^|/)docs/superpowers/plans/"),
+    re.compile(r"(?i)(^|/)docs/superpowers/specs/"),
+    re.compile(r"(?i)(^|/)docs/plans/"),
+    re.compile(r"(?i)(^|/)docs/specs/"),
+    re.compile(r"(?i)(^|/)docs/design/"),
+    re.compile(r"(?i)(^|/)docs/proposals/"),
+    re.compile(r"(?i)(^|/)docs/rfcs/"),
+)
+
+
+def is_aspirational_doc(path: str) -> bool:
+    """True for docs that describe a future / proposed / alternative
+    state of the repo — plan docs, spec docs, design notes, proposals,
+    RFCs. Dead-command findings in these get demoted from
+    `Update` to `Needs verification` because the command is usually
+    a planned-but-not-yet-shipped reference, not drift.
+    """
+    path_fwd = path.replace("\\", "/")
+    return any(p.search(path_fwd) for p in _ASPIRATIONAL_PATH_PATTERNS)
 
 
 def _command_is_declared(cmd: str, declared: set[str]) -> bool:

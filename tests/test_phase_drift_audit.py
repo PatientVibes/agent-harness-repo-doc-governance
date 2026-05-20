@@ -94,3 +94,75 @@ def test_single_agent_file_is_not_a_conflict(tmp_path: Path):
         if f.kind == "conflicting_agent_instructions"
     ]
     assert conflicts == []
+
+
+# ---- Aspirational-doc (plan / spec) exemption ------------------------------
+
+
+def test_plan_doc_dead_command_is_needs_verification_not_update(tmp_path: Path):
+    """A plan doc that references `npm run dev` against a repo without
+    `package.json` describes future state — demote to
+    `Needs verification`, not `Update`."""
+    import json
+    import subprocess
+
+    repo = tmp_path / "ad"
+    repo.mkdir()
+    (repo / "README.md").write_text("# ad\n", encoding="utf-8")
+    (repo / "package.json").write_text(
+        json.dumps({"name": "ad", "version": "0.0.1", "scripts": {"test": "echo ok"}}),
+        encoding="utf-8",
+    )
+    plan_dir = repo / "docs" / "superpowers" / "plans"
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "2026-05-19-frontend.md").write_text(
+        "# Frontend plan\n\nWhen the frontend lands, run `npm run dev` to start it.\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=str(repo), check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=str(repo), check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=str(repo), check=True)
+    subprocess.run(["git", "add", "."], cwd=str(repo), check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "i"], cwd=str(repo), check=True)
+
+    state = _run_through_phase3(repo)
+
+    findings = [
+        f for f in state.drift_findings if "npm run dev" in f.detail
+    ]
+    assert len(findings) == 1
+    f = findings[0]
+    assert f.kind == "dead_command_in_aspirational_doc"
+    assert f.classification == Classification.NEEDS_VERIFICATION
+    # Severity is Low, not High — aspirational doc is less load-bearing.
+    from repo_doc_governance.models import Severity
+    assert f.severity == Severity.LOW
+
+
+def test_regular_doc_dead_command_stays_high_update(tmp_path: Path):
+    """Compare baseline — a dead command outside a plan/spec dir is
+    still HIGH + Update."""
+    repo = build_drifted_repo(tmp_path)  # README references `npm run deploy`
+    state = _run_through_phase3(repo)
+    dead = [f for f in state.drift_findings if f.kind == "dead_command"]
+    assert dead, "expected at least one dead_command finding"
+    f = dead[0]
+    assert f.classification == Classification.UPDATE
+    from repo_doc_governance.models import Severity
+    assert f.severity == Severity.HIGH
+
+
+def test_is_aspirational_doc_matches_plan_dirs():
+    """Spec-level test of the path classifier itself."""
+    assert drift_audit.is_aspirational_doc("docs/superpowers/plans/x.md")
+    assert drift_audit.is_aspirational_doc("docs/superpowers/specs/x.md")
+    assert drift_audit.is_aspirational_doc("docs/plans/2026-foo.md")
+    assert drift_audit.is_aspirational_doc("docs/specs/foo.md")
+    assert drift_audit.is_aspirational_doc("docs/design/arch.md")
+    assert drift_audit.is_aspirational_doc("docs/proposals/foo.md")
+    assert drift_audit.is_aspirational_doc("docs/rfcs/0001.md")
+    # Non-aspirational
+    assert not drift_audit.is_aspirational_doc("README.md")
+    assert not drift_audit.is_aspirational_doc("docs/HANDOFF.md")
+    assert not drift_audit.is_aspirational_doc("docs/ARCHITECTURE.md")
+    assert not drift_audit.is_aspirational_doc("AGENTS.md")
