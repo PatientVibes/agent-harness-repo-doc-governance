@@ -8,8 +8,11 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
+from pipeline_trace import PipelineTrace
 from pydantic import BaseModel, Field
+from token_tracker import TokenTracker
 
 from repo_doc_governance.models import (
     CodeFirstMap,
@@ -123,6 +126,23 @@ class RunState(BaseModel):
 
     pr_branch_name: str | None = None
     """Feature branch Phase 9 used. Recorded for trace + post-mortem."""
+
+    # --- Observability ----------------------------------------------------
+
+    trace_path: Path | None = None
+    """Optional path to a JSONL trace file. When set, the orchestrator
+    instantiates `pipeline_trace` from it and emits per-phase entry/exit
+    + per-LLM-call events. When unset, no trace file is written."""
+
+    token_tracker: TokenTracker = Field(default_factory=TokenTracker)
+    """Per-run token usage accumulator. Always present; LLM phases record
+    every call. Read via `token_tracker.totals()` / `cost_estimate(...)`
+    after the run."""
+
+    pipeline_trace: PipelineTrace | None = None
+    """JSONL trace writer. Set by the orchestrator iff `trace_path` is
+    set. LLM phases call `pipeline_trace.llm_call(...)`; the orchestrator
+    emits `phase_start` / `phase_end` events around every phase."""
 
     # --- Execution metadata -----------------------------------------------
 

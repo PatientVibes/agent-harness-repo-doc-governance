@@ -24,6 +24,7 @@ from pathlib import Path
 from repo_doc_governance import llm_runtime
 from repo_doc_governance.models import DocFile, DocKind
 from repo_doc_governance.phase_impls._diff import unified_diff
+from repo_doc_governance.phase_impls._observability import record_llm_call
 from repo_doc_governance.phase_impls._prompts import load_prompt
 from repo_doc_governance.state import RunState
 
@@ -137,6 +138,9 @@ def _generate_canonical(
         ),
         user_prompt=user_prompt,
         repo_path=state.target_repo,
+    )
+    record_llm_call(
+        state, source="phase5_agent_instructions", ref=canonical_path, result=result
     )
     return result.text.strip()
 

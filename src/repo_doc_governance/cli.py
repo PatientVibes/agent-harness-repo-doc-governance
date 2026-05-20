@@ -94,6 +94,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument(
         "--json", action="store_true", help="Emit summary as JSON to stdout."
     )
+    p_run.add_argument(
+        "--trace",
+        type=Path,
+        default=None,
+        help="Write a JSONL pipeline trace to this path (off by default).",
+    )
 
     p_audit = subparsers.add_parser(
         "audit", help="Read-only. JSON output. No PR, no file writes."
@@ -107,6 +113,12 @@ def _build_parser() -> argparse.ArgumentParser:
             "Exit non-zero if findings at-or-above the given severity exist. "
             "Useful for CI gating. `never` always exits 0."
         ),
+    )
+    p_audit.add_argument(
+        "--trace",
+        type=Path,
+        default=None,
+        help="Write a JSONL pipeline trace to this path (off by default).",
     )
 
     p_batch = subparsers.add_parser(
@@ -161,6 +173,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     state.base_branch = args.base_branch
     state.execute_phase9 = args.execute
     state.execute_tier2 = args.execute_tier2
+    state.trace_path = args.trace
     result = run(state)
     if args.json:
         json.dump(_jsonable_summary(result), sys.stdout, indent=2)
@@ -175,6 +188,7 @@ def _cmd_audit(args: argparse.Namespace) -> int:
     state.phases_to_run = list(_AUDIT_PHASES)
     state.base_branch = "main"  # irrelevant — audit doesn't create branches
     state.execute_phase9 = False  # never executes
+    state.trace_path = args.trace
     result = run(state)
 
     report = _audit_report(result)
@@ -232,6 +246,7 @@ def _jsonable_summary(state) -> dict:
     out["pr_branch_name"] = state.pr_branch_name
     out["pr_body_draft"] = state.pr_body_draft
     out["canonical_agent_file"] = state.canonical_agent_file
+    out["trace_path"] = str(state.trace_path) if state.trace_path else None
     return out
 
 

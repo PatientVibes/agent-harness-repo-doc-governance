@@ -18,6 +18,7 @@ from pathlib import Path
 from repo_doc_governance import llm_runtime
 from repo_doc_governance.models import DocKind
 from repo_doc_governance.phase_impls._diff import unified_diff
+from repo_doc_governance.phase_impls._observability import record_llm_call
 from repo_doc_governance.phase_impls._prompts import load_prompt
 from repo_doc_governance.state import RunState
 
@@ -58,6 +59,7 @@ def run(state: RunState) -> RunState:
         user_prompt=user_prompt,
         repo_path=repo,
     )
+    record_llm_call(state, source="phase4_readme", ref=readme_rel, result=result)
 
     proposed = result.text.strip()
     if not proposed:

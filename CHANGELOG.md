@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added (v0.1.x follow-up — token tracker + pipeline trace wiring)
+- `RunState` now carries a `token_tracker: TokenTracker` (always
+  present, accumulator-style — see `agent-tool-token-tracker`) and an
+  optional `pipeline_trace: PipelineTrace` (instantiated by the
+  orchestrator iff `state.trace_path` is set — see
+  `agent-tool-pipeline-trace`).
+- The orchestrator emits `pipeline_start`, per-phase
+  `phase_start` / `phase_end`, `pipeline_end`, and `error` events into
+  the trace file when configured. LLM phases (4, 5, 6) emit an
+  `llm_call` event and record token usage on the tracker via
+  `phase_impls/_observability.record_llm_call`.
+- `summary(state)` now includes `token_usage` (per-source totals) so
+  `--json` CLI output and the `POST /run` HTTP response surface it.
+- CLI: `run` and `audit` both gained `--trace PATH` to write a JSONL
+  pipeline trace alongside the run.
+- **Bug fix:** `README_ONLY` task now includes Phase 1 (Survey).
+  Without it, Phase 4 (README) bailed early on `state.inventory is None`
+  and never invoked the LLM. The skill triage table calls out "2, 4, 9"
+  but the harness needs Phase 1's inventory to write a README's
+  "Repository structure" section.
+
 ## [0.1.0] — 2026-05-19
 
 ### Added (PR #6 — feature-complete release)

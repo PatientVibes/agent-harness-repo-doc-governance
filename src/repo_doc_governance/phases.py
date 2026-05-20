@@ -46,7 +46,7 @@ class Task(str, Enum):
 # Task → phases mapping. Source of truth:
 # `src/repo_doc_governance/prompts/skill_body.md` (vendored), "Triage" table.
 TASK_TO_PHASES: dict[Task, list[Phase]] = {
-    Task.README_ONLY: [Phase.CODE_FIRST, Phase.README, Phase.PR_HANDOFF],
+    Task.README_ONLY: [Phase.SURVEY, Phase.CODE_FIRST, Phase.README, Phase.PR_HANDOFF],
     Task.TODO_CLEANUP: [Phase.SURVEY, Phase.HANDOFF, Phase.PR_HANDOFF],
     Task.AGENT_CONSOLIDATION: [Phase.SURVEY, Phase.AGENT_INSTRUCTIONS, Phase.PR_HANDOFF],
     Task.DRIFT_SWEEP: [
