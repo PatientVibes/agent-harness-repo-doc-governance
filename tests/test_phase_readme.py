@@ -87,6 +87,29 @@ def test_readme_phase_passes_drift_findings(tmp_path: Path):
     assert "npm run deploy" in call["user_prompt"]
 
 
+def test_readme_phase_strips_llm_preamble(tmp_path: Path):
+    """Surfaced in v0.1.3 dogfood (#27): Sonnet 4.6 emits chain-of-thought
+    prose above the first H1, defeating Phase 9's no-change short-circuit.
+    The phase must defensively strip the preamble.
+    """
+    repo = build_clean_repo(tmp_path)
+    state = _through_phase3(repo)
+
+    leaked = (
+        "No drift was flagged and the repo contents confirm all existing "
+        "README content is accurate. The README is output verbatim.\n\n"
+        "# clean-fixture\n\nBody.\n"
+    )
+    llm_runtime.set_runner(StubLLMRunner(text=leaked))
+    readme.run(state)
+
+    assert state.readme_proposed.startswith("# clean-fixture"), (
+        f"Phase 4 did not strip the preamble. Output starts with: "
+        f"{state.readme_proposed[:120]!r}"
+    )
+    assert "No drift was flagged" not in state.readme_proposed
+
+
 def test_readme_phase_includes_current_readme_content(tmp_path: Path):
     """Load-bearing — the LLM must see the EXISTING README content so it
     can honor the preserve-existing-content rule. Without this, the LLM
