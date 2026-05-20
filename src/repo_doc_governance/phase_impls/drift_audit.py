@@ -33,6 +33,7 @@ from repo_doc_governance.models import (
     DriftFinding,
     Severity,
 )
+from repo_doc_governance.phase_impls._utils import git_ls_files, is_git_repo
 from repo_doc_governance.state import RunState
 
 
@@ -110,6 +111,7 @@ def run(state: RunState) -> RunState:
             findings.extend(_audit_vague_todos(doc, text))
 
     findings.extend(_audit_conflicting_agent_files(state))
+    findings.extend(_audit_undocumented_env_vars(state))
 
     state.drift_findings.extend(findings)
     return state
@@ -402,3 +404,144 @@ def _audit_conflicting_agent_files(state: RunState) -> list[DriftFinding]:
         )
         for df in root_level
     ]
+
+
+# ---------------------------------------------------------------------------
+# Env-var coverage audit
+# ---------------------------------------------------------------------------
+#
+# Surfaced by the v0.1.4 dogfood (closed PR
+# `PatientVibes/agent-harness-card-extractor#3`): the LLM Phase-4 pass got
+# 6 of 8 missing env-var rows but silently dropped `ENABLE_AUDIT` /
+# `ENABLE_PREPROCESSING`. "Env var referenced in code but absent from
+# README" is deterministic; Phase 3 should produce these findings so Phase
+# 4 only has to render them, not discover them.
+
+# Python read patterns. `os.environ["X"]` is matched only as a READ
+# (no trailing `=`); writes (`os.environ["X"] = ...`) are excluded
+# downstream.
+_ENV_PYTHON_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"""os\.environ\.get\(\s*["']([A-Z_][A-Z0-9_]*)["']"""),
+    re.compile(r"""os\.getenv\(\s*["']([A-Z_][A-Z0-9_]*)["']"""),
+    re.compile(r"""os\.environ\[\s*["']([A-Z_][A-Z0-9_]*)["']\s*\](?!\s*=[^=])"""),
+)
+
+# Env-var names whose suffix marks them as a secret. Secrets are
+# referenced separately under the README's prose / "Environment variables"
+# preamble, not as table rows — flagging them as undocumented produces FPs.
+_SECRET_NAME_SUFFIXES: tuple[str, ...] = (
+    "_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_PASSPHRASE", "_CREDENTIAL",
+    "_CREDENTIALS", "_API_KEY", "_ACCESS_KEY", "_PRIVATE_KEY",
+)
+
+# Source-file extensions to scan. Python first per the issue scope; JS/TS/
+# Rust/Go can land in follow-ups under the same shape.
+_ENV_SCANNABLE_EXTENSIONS: tuple[str, ...] = (".py",)
+
+
+def _audit_undocumented_env_vars(state: RunState) -> list[DriftFinding]:
+    """Detect env vars referenced in source files but absent from the
+    README's env-var documentation. One finding per undocumented name.
+    """
+    if state.inventory is None:
+        return []
+    repo = state.target_repo
+
+    readme_text = _read_root_readme(state)
+    if not readme_text:
+        # No README at all: out of scope. Phase 4 will create one from
+        # the template; the env-var rows can land then.
+        return []
+
+    referenced = _extract_python_env_var_refs(repo)
+    if not referenced:
+        return []
+
+    documented = _extract_documented_env_var_names(readme_text)
+    undocumented = sorted(
+        name for name in referenced
+        if name not in documented and not _looks_like_secret_name(name)
+    )
+
+    readme_rel = _find_root_readme_path(state) or "README.md"
+    return [
+        DriftFinding(
+            path=readme_rel,
+            kind="env_var_undocumented",
+            severity=Severity.MEDIUM,
+            classification=Classification.UPDATE,
+            detail=(
+                f"`{name}` is referenced in source files but not documented "
+                f"in {readme_rel}. Add a row to the env-var table."
+            ),
+        )
+        for name in undocumented
+    ]
+
+
+def _read_root_readme(state: RunState) -> str:
+    rel = _find_root_readme_path(state)
+    if rel is None:
+        return ""
+    try:
+        return (state.target_repo / rel).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _find_root_readme_path(state: RunState) -> str | None:
+    if state.inventory is None:
+        return None
+    for df in state.inventory.agent_files:
+        if df.kind == DocKind.README and "/" not in df.path:
+            return df.path
+    return None
+
+
+def _extract_python_env_var_refs(repo: Path) -> set[str]:
+    """Walk tracked `.py` files; return the set of env-var names
+    referenced (reads only). Best-effort: missing files / OS errors
+    are skipped silently. Untracked files are NOT scanned — the audit
+    follows the same `git ls-files` convention as the rest of survey.
+    """
+    if not is_git_repo(repo):
+        return set()
+    try:
+        tracked = git_ls_files(repo)
+    except Exception:
+        return set()
+
+    out: set[str] = set()
+    for rel in tracked:
+        if not rel.endswith(_ENV_SCANNABLE_EXTENSIONS):
+            continue
+        try:
+            text = (repo / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for pattern in _ENV_PYTHON_PATTERNS:
+            for match in pattern.finditer(text):
+                out.add(match.group(1))
+    return out
+
+
+# A README documents an env var if its name appears inside backticks
+# (the README convention) OR as a bare word in a likely env-var context.
+# We match the conservative form: `\`<NAME>\`` anywhere in the text.
+_ENV_DOCUMENTED_RE = re.compile(r"`([A-Z_][A-Z0-9_]{2,})`")
+
+
+def _extract_documented_env_var_names(readme_text: str) -> set[str]:
+    """Set of all-caps tokens that appear inside backticks in the README.
+    Conservative — only matches the documented convention. Tokens shorter
+    than 4 chars (e.g. `URL`) are excluded to avoid sweeping generic acronyms.
+    """
+    return {match.group(1) for match in _ENV_DOCUMENTED_RE.finditer(readme_text)}
+
+
+def _looks_like_secret_name(name: str) -> bool:
+    """Names suffixed with `_KEY`, `_TOKEN`, etc. are secrets — they're
+    typically referenced in README prose, not the env-var table, so they
+    would otherwise be high-FP."""
+    upper = name.upper()
+    return any(upper.endswith(suffix) for suffix in _SECRET_NAME_SUFFIXES)

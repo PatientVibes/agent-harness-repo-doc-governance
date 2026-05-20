@@ -231,6 +231,149 @@ def test_line_is_refuse_list_documentation_matches_expected_keywords():
     assert not _line_is_refuse_list_documentation("First, run `make build`.")
 
 
+def test_env_var_in_code_but_not_in_readme_is_flagged_undocumented(
+    tmp_path: Path,
+):
+    """Closes the v0.1.4 dogfood coverage gap (#34): env vars consumed
+    by code but missing from the README env-var table must produce
+    deterministic `env_var_undocumented` findings so Phase 4 only
+    renders the row instead of having to discover it.
+    """
+    import subprocess
+
+    repo = tmp_path / "ev"
+    repo.mkdir()
+    (repo / "README.md").write_text(
+        "# ev\n\n## Environment variables\n\n"
+        "| Variable | Default | Description |\n"
+        "|---|---|---|\n"
+        "| `RENDER_DPI` | `300` | Documented. |\n",
+        encoding="utf-8",
+    )
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname='ev'\nversion='0.0.1'\n", encoding="utf-8"
+    )
+    (repo / "src").mkdir()
+    (repo / "src" / "app.py").write_text(
+        "import os\n"
+        "dpi = int(os.environ.get('RENDER_DPI', '300'))\n"
+        "undocumented = os.environ.get('UNDOCUMENTED_KNOB', 'x')\n"
+        "second = os.getenv('SECOND_KNOB')\n"
+        "third = os.environ['THIRD_KNOB']\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=str(repo), check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=str(repo), check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=str(repo), check=True)
+    subprocess.run(["git", "add", "."], cwd=str(repo), check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "i"], cwd=str(repo), check=True)
+
+    state = _run_through_phase3(repo)
+
+    flagged_names = sorted(
+        f.detail.split("`")[1]
+        for f in state.drift_findings
+        if f.kind == "env_var_undocumented"
+    )
+    # Three undocumented vars; documented `RENDER_DPI` is NOT flagged.
+    assert flagged_names == ["SECOND_KNOB", "THIRD_KNOB", "UNDOCUMENTED_KNOB"]
+    assert all(
+        f.path == "README.md"
+        for f in state.drift_findings
+        if f.kind == "env_var_undocumented"
+    )
+    assert all(
+        f.classification == Classification.UPDATE
+        for f in state.drift_findings
+        if f.kind == "env_var_undocumented"
+    )
+
+
+def test_env_var_secret_names_are_suppressed(tmp_path: Path):
+    """`_KEY` / `_TOKEN` / `_SECRET` / `_PASSWORD` suffixes are typically
+    documented in README prose, not the env-var table. Flagging them as
+    undocumented produces high-FP — the suppression list keeps the
+    audit clean against API-key-driven projects.
+    """
+    import subprocess
+
+    repo = tmp_path / "secret"
+    repo.mkdir()
+    (repo / "README.md").write_text(
+        "# secret\n\nEnv vars: see deployment notes for OPENROUTER_API_KEY.\n",
+        encoding="utf-8",
+    )
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname='s'\nversion='0.0.1'\n", encoding="utf-8"
+    )
+    (repo / "app.py").write_text(
+        "import os\n"
+        "k = os.environ.get('OPENROUTER_API_KEY')\n"
+        "t = os.environ.get('GH_TOKEN')\n"
+        "s = os.getenv('SOME_SECRET')\n"
+        "p = os.environ['DB_PASSWORD']\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=str(repo), check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=str(repo), check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=str(repo), check=True)
+    subprocess.run(["git", "add", "."], cwd=str(repo), check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "i"], cwd=str(repo), check=True)
+
+    state = _run_through_phase3(repo)
+    findings = [f for f in state.drift_findings if f.kind == "env_var_undocumented"]
+    assert findings == [], (
+        f"Secret-suffix env vars must be suppressed. Got: "
+        f"{[f.detail for f in findings]}"
+    )
+
+
+def test_env_var_writes_are_not_treated_as_reads(tmp_path: Path):
+    """`os.environ['X'] = ...` is the harness *setting* X, not consuming
+    it. Must not produce an `env_var_undocumented` finding for X.
+    """
+    import subprocess
+
+    repo = tmp_path / "writes"
+    repo.mkdir()
+    (repo / "README.md").write_text("# writes\n", encoding="utf-8")
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname='w'\nversion='0.0.1'\n", encoding="utf-8"
+    )
+    (repo / "setup.py").write_text(
+        "import os\n"
+        "# Set a debug flag — this is a WRITE, not a read.\n"
+        "os.environ['ASSIGNED_BY_SETUP'] = '1'\n"
+        "# Also a real READ — should still be flagged.\n"
+        "consumed = os.environ.get('TRULY_CONSUMED', 'x')\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=str(repo), check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=str(repo), check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=str(repo), check=True)
+    subprocess.run(["git", "add", "."], cwd=str(repo), check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "i"], cwd=str(repo), check=True)
+
+    state = _run_through_phase3(repo)
+    names = sorted(
+        f.detail.split("`")[1] for f in state.drift_findings
+        if f.kind == "env_var_undocumented"
+    )
+    assert names == ["TRULY_CONSUMED"], (
+        f"Expected only TRULY_CONSUMED to be flagged; got: {names}"
+    )
+
+
+def test_clean_repo_has_no_env_var_findings(tmp_path: Path):
+    """The clean-repo fixture has a Node README + `src/index.js`, no
+    Python at all. Audit must produce zero env-var findings."""
+    repo = build_clean_repo(tmp_path)
+    state = _run_through_phase3(repo)
+    assert [
+        f for f in state.drift_findings if f.kind == "env_var_undocumented"
+    ] == []
+
+
 def test_is_aspirational_doc_matches_plan_dirs():
     """Spec-level test of the path classifier itself."""
     assert drift_audit.is_aspirational_doc("docs/superpowers/plans/x.md")
