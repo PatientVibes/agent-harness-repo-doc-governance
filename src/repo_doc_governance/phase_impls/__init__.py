@@ -8,8 +8,11 @@ PR #3 lands the deterministic phases (1, 2, 3, 7, 8 Tier-1). LLM phases
 """
 
 from repo_doc_governance.phase_impls import (
+    agent_instructions,
     code_first,
     drift_audit,
+    handoff,
+    readme,
     stale_artifacts,
     survey,
     verification,
@@ -19,6 +22,9 @@ __all__ = [
     "survey",
     "code_first",
     "drift_audit",
+    "readme",
+    "agent_instructions",
+    "handoff",
     "stale_artifacts",
     "verification",
 ]
