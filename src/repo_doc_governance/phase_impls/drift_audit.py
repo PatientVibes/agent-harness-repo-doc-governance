@@ -216,6 +216,28 @@ def _audit_commands(
                 # doesn't flag style variations (`npm run test` vs `npm test`).
                 if _command_is_declared(cmd, declared):
                     continue
+                # Refuse-list / blocklist / denylist documentation context:
+                # the command is being documented as one the harness REFUSES
+                # to run, not as one users should run. Demote to INFO+Keep
+                # so Phase 4 doesn't try to "fix" it. Surfaced by the
+                # harness's own README dogfood under PR #8.
+                if _line_is_refuse_list_documentation(line):
+                    out.append(
+                        DriftFinding(
+                            path=doc.path,
+                            kind="dead_command_in_refuse_list_documentation",
+                            severity=Severity.INFO,
+                            classification=Classification.KEEP,
+                            detail=(
+                                f"`{cmd}` appears in refuse-list / blocklist "
+                                f"documentation context (line mentions "
+                                f"refuse/blocked/rejected), not as a "
+                                f"runnable command. No action needed."
+                            ),
+                            line=line_no,
+                        )
+                    )
+                    continue
                 if is_aspirational:
                     # Plan / spec / design docs describe future or
                     # alternative state. A `dead_command` here is usually
@@ -262,6 +284,25 @@ _ASPIRATIONAL_PATH_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"(?i)(^|/)docs/proposals/"),
     re.compile(r"(?i)(^|/)docs/rfcs/"),
 )
+
+
+# Refuse-list documentation context: words that mark a command as one the
+# harness or runtime REFUSES to execute, not as one users should run.
+# Single-line check — the harness's own README dogfood (the surfacing
+# repro) has both the keyword and the command on the same line.
+_REFUSE_LIST_KEYWORDS_RE = re.compile(
+    r"(?i)\b(refuse[ds]?|refuses|refuse[- ]list|blocked|blocklist|"
+    r"denylist|deny[- ]list|rejected|forbidden|disallowed)\b"
+)
+
+
+def _line_is_refuse_list_documentation(line: str) -> bool:
+    """True iff the line documents a command as refused/blocked, not as
+    one users should run. Avoids flagging `npm publish` etc. as dead
+    commands when they appear in a refuse-list / blocklist / denylist
+    context.
+    """
+    return bool(_REFUSE_LIST_KEYWORDS_RE.search(line))
 
 
 def is_aspirational_doc(path: str) -> bool:
