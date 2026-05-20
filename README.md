@@ -38,7 +38,9 @@ Three runtime modes:
 | `audit` | `repo-doc-gov audit --repo PATH` | `POST /audit` | JSON drift report; no PR, no edits |
 | `batch` | `repo-doc-gov batch --config repos.yaml` | n/a | One PR per repo, semaphore-bounded |
 
-## Quick start
+## Quick start (contributors)
+
+For working ON the harness — clone, dev-install, run the suite:
 
 ```bash
 uv pip install -e ".[dev]"
@@ -50,6 +52,119 @@ pytest -m integration           # opt-in real-LLM tests (requires API key, see E
 Integration tests dispatch real LLM calls — they self-skip when no
 `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY` is in the environment.
 Typical cost is under $0.05 per run with Haiku 4.5.
+
+For consuming the harness against your own repos, see [Usage](#usage) below.
+
+## Usage
+
+### 1. Install on a host
+
+```bash
+# Pinned tag (recommended — keeps audit output stable across runs)
+uv tool install --from 'git+https://github.com/PatientVibes/agent-harness-repo-doc-governance.git@v0.1.6' agent-harness-repo-doc-governance
+
+# Or track latest:
+uv tool install --from 'git+https://github.com/PatientVibes/agent-harness-repo-doc-governance.git' agent-harness-repo-doc-governance
+
+repo-doc-gov --version  # 0.1.6
+```
+
+### 2. Authentication
+
+| Mode | Requires |
+|---|---|
+| `audit` | nothing — read-only, no LLM call, no PR |
+| `run` (dry-run, no `--execute`) | an LLM key (`OPENROUTER_API_KEY` *or* `ANTHROPIC_API_KEY`) |
+| `run --execute` / `batch --execute` | LLM key + `gh auth login` (interactive) *or* `GH_TOKEN` (unattended) |
+
+LLM-route notes:
+
+- `OPENROUTER_API_KEY` → default model `openrouter/google/gemini-2.5-pro`. Uses `langchain-openai` (already a hard dep).
+- `ANTHROPIC_API_KEY` (no OpenRouter key set) → default model `anthropic:claude-sonnet-4-6`. **Requires `uv pip install langchain-anthropic`** — it's not a hard dep because OpenRouter covers Anthropic routes too. If you skip this install, the integration test self-skips and a real `run` will fail at `_make_llm()`.
+
+### 3. Modes
+
+**Audit** — read-only drift report, no LLM, fastest CI gate:
+
+```bash
+repo-doc-gov audit --repo /path/to/target --fail-on high
+```
+
+Exits non-zero when any finding at or above the named severity exists. `--fail-on` accepts `any | high | blocker | never`. Output is structured JSON on stdout.
+
+**Run** — one repo, opens a PR via `gh`:
+
+```bash
+# Dry run: composes the PR body, doesn't touch git
+repo-doc-gov run --repo /path/to/target --task full-pass
+
+# Execute: branch + commit + push + gh pr create
+repo-doc-gov run --repo /path/to/target --task full-pass --base-branch main --execute --trace /tmp/run.jsonl
+```
+
+Tasks: `full-pass` (default), `readme-only`, `todo-cleanup`, `agent-consolidation`, `drift-sweep`, `from-scratch`. Cost is typically \$0.10–\$2.50 per run depending on target size + model.
+
+**Batch** — many repos, semaphore-bounded:
+
+```bash
+repo-doc-gov batch --config repos.yaml --concurrency 4 --execute
+```
+
+`repos.yaml`:
+
+```yaml
+repos:
+  - path: /chorus/repos/agent-tool-llm-utils
+    # Defaults: task=full-pass, base_branch=main
+  - path: /chorus/repos/agent-harness-card-extractor
+    task: drift-sweep
+    base_branch: master
+  - /chorus/repos/agent-tool-pdf-builder   # Bare string = full-pass against main
+```
+
+### 4. CI: audit-as-a-gate
+
+Drop into a target repo's `.github/workflows/audit.yml` to gate merges on drift:
+
+```yaml
+name: docs audit
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest   # or [self-hosted, <your-label>]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - name: Install harness
+        run: |
+          uv tool install --from 'git+https://github.com/PatientVibes/agent-harness-repo-doc-governance.git@v0.1.6' agent-harness-repo-doc-governance
+      - name: Run audit
+        shell: bash
+        run: |
+          set -o pipefail
+          repo-doc-gov audit --repo . --fail-on high --trace .audit-trace.jsonl | tee audit-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: audit-${{ github.run_id }}
+          path: |
+            audit-report.json
+            .audit-trace.jsonl
+          retention-days: 14
+```
+
+Pin to a release tag (`@v0.1.6`) so audit findings stay stable across CI runs. The harness self-policies on the same pattern — see [`.github/workflows/audit.yml`](.github/workflows/audit.yml) (self-hosted runner variant).
 
 ## Dependencies
 
@@ -68,7 +183,7 @@ Three PatientVibes tools are pulled from GitHub via `[tool.uv.sources]` in `pypr
 
 | Variable | Required | Description |
 |---|---|---|
-| `OPENROUTER_API_KEY` *or* `ANTHROPIC_API_KEY` | Manual / batch modes | LLM provider key for Phases 4/5/6. Fallback: `~/.config/repo-doc-gov/env` (mode 600), per the `config-env-loading` convention. |
+| `OPENROUTER_API_KEY` *or* `ANTHROPIC_API_KEY` | Manual / batch modes | LLM provider key for Phases 4/5/6. The `ANTHROPIC_API_KEY` route additionally requires `uv pip install langchain-anthropic`. |
 | `GH_TOKEN` | Unattended manual / batch modes | GitHub PR creation. Falls back to `gh auth status` for human-invoked runs. |
 
 ## 12-component harness implementation
