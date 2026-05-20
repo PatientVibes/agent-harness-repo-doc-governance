@@ -115,19 +115,25 @@ def test_run_state_default_collections_are_empty(tmp_path: Path):
 # ---- run() exception-handling path -----------------------------------------
 
 
-def test_run_after_pr3_completes_deterministic_phases(tmp_path: Path):
-    """PR #3 lands the deterministic phases (1, 2, 3, 7, 8 Tier-1).
-    For README_ONLY ([CODE_FIRST, README, PR_HANDOFF]), CODE_FIRST is now
-    deterministic and should complete; README and PR_HANDOFF stay stubs
-    and end up in `phases_failed`. The orchestrator must continue past
-    failures.
+def test_run_after_pr4_completes_through_readme_phase(tmp_path: Path):
+    """PR #4 lands LLM Phases 4/5/6. README_ONLY runs
+    [CODE_FIRST, README, PR_HANDOFF]; with the stub runner injected,
+    Phase 4 (README) now completes. Only PR_HANDOFF stays a stub.
     """
-    state = make_run_state(tmp_path, Task.README_ONLY)
-    result = run(state)
+    from repo_doc_governance import llm_runtime
+    from repo_doc_governance.llm_runtime import StubLLMRunner
 
-    assert result.phases_completed == [Phase.CODE_FIRST]
+    llm_runtime.set_runner(StubLLMRunner(text="# fixture\n\nbody\n"))
+    try:
+        state = make_run_state(tmp_path, Task.README_ONLY)
+        result = run(state)
+    finally:
+        llm_runtime.set_runner(None)
+
+    assert Phase.CODE_FIRST in result.phases_completed
+    assert Phase.README in result.phases_completed
     failed_phases = [f.phase for f in result.phases_failed]
-    assert failed_phases == [Phase.README, Phase.PR_HANDOFF]
+    assert failed_phases == [Phase.PR_HANDOFF]
     assert all(f.error_type == "NotImplementedError" for f in result.phases_failed)
 
 
@@ -170,15 +176,23 @@ def test_run_continues_past_first_failure(tmp_path: Path):
     """Specifically the defensive behavior — one phase failing must not
     short-circuit the remaining phases."""
     import subprocess
+
+    from repo_doc_governance import llm_runtime
+    from repo_doc_governance.llm_runtime import StubLLMRunner
+
     subprocess.run(["git", "init", "-q"], cwd=str(tmp_path), check=True)
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
                     "commit", "--allow-empty", "-m", "init", "-q"],
                    cwd=str(tmp_path), check=True)
 
-    state = make_run_state(tmp_path, Task.FULL_PASS)
-    result = run(state)
+    llm_runtime.set_runner(StubLLMRunner(text="# stub\n"))
+    try:
+        state = make_run_state(tmp_path, Task.FULL_PASS)
+        result = run(state)
+    finally:
+        llm_runtime.set_runner(None)
 
-    # All 9 phases attempted. PR #3 = 5 deterministic complete, 4 stub fail.
+    # All 9 phases attempted. PR #4 = 8 phases complete (1-8), PR_HANDOFF still stub.
     assert len(result.phases_failed) + len(result.phases_completed) == 9
 
 

@@ -109,8 +109,11 @@ def _build_dispatch() -> dict[Phase, PhaseFn]:
     # imports at top level (avoids the circular import that would
     # otherwise form once state.py imports from this module).
     from repo_doc_governance.phase_impls import (
+        agent_instructions,
         code_first,
         drift_audit,
+        handoff,
+        readme,
         stale_artifacts,
         survey,
         verification,
@@ -120,6 +123,9 @@ def _build_dispatch() -> dict[Phase, PhaseFn]:
     dispatch[Phase.SURVEY] = survey.run
     dispatch[Phase.CODE_FIRST] = code_first.run
     dispatch[Phase.DRIFT_AUDIT] = drift_audit.run
+    dispatch[Phase.README] = readme.run
+    dispatch[Phase.AGENT_INSTRUCTIONS] = agent_instructions.run
+    dispatch[Phase.HANDOFF] = handoff.run
     dispatch[Phase.STALE_ARTIFACTS] = stale_artifacts.run
     dispatch[Phase.VERIFICATION] = verification.run
     return dispatch

@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (PR #4)
+- `src/repo_doc_governance/llm_runtime.py` — `LLMRunner` protocol +
+  `LLMRunResult` dataclass + `ReactLLMRunner` (default, wraps
+  `langgraph.create_react_agent` with read-only repo-scoped file tools)
+  + `StubLLMRunner` (tests). Module-level `get_runner()` / `set_runner()`
+  is the injection point.
+- `make_repo_scoped_tools(repo)` builds `read_file` + `glob_files` tools
+  whose resolved paths must be inside `repo.resolve()`. Path traversal
+  is rejected at the tool level.
+- `src/repo_doc_governance/phase_impls/_prompts.py` — section-aware
+  loader for the vendored `phases.md` / `decisions.md` / `templates.md`
+  files. LLM phases pull only the slice they need (e.g. "## Phase 4 —
+  README update") into the system prompt rather than the full file.
+- `src/repo_doc_governance/phase_impls/_diff.py` — `unified_diff(repo,
+  rel_path, proposed)` helper used by all three LLM phases.
+- **Phase 4 README** (`phase_impls/readme.py`) — builds a prompt from
+  the inventory, code-first map, and README-targeted drift findings and
+  asks the LLM for the proposed new README body. Unified diff goes in
+  `state.readme_diff`. No filesystem mutation.
+- **Phase 5 Agent-instruction consolidation** (`phase_impls/agent_instructions.py`)
+  — deterministically picks the canonical file (`AGENTS.md` default;
+  `CLAUDE.md` when `.claude/**` infrastructure is present), then asks the
+  LLM for the canonical body and template-fills thin wrappers for the
+  others. `state.canonical_agent_file` records the decision so the PR
+  body (Phase 9) can quote it. `state.agent_files_diff` is the
+  concatenated per-file diff, separated by `--- file: <path> ---`.
+- **Phase 6 HANDOFF** (`phase_impls/handoff.py`) — picks an existing
+  `docs/HANDOFF.md` or `HANDOFF.md`, falls back to creating
+  `docs/HANDOFF.md`, asks the LLM to refresh it using the existing
+  TODO/ROADMAP/HANDOFF inputs + handoff-targeted drift findings. Diff
+  goes in `state.handoff_diff`.
+- Per-phase test files: `test_phase_readme.py`,
+  `test_phase_agent_instructions.py`, `test_phase_handoff.py`,
+  `test_llm_runtime.py`. Tests use `StubLLMRunner` (no real LLM call)
+  to verify prompt content + diff computation + canonical decision.
+  Path-traversal rejection on `read_file` tool exercised against a
+  real `tmp_path` siblings setup.
+- Orchestrator tests updated for PR #4 — `README_ONLY` task now
+  completes `CODE_FIRST` + `README` and only `PR_HANDOFF` remains a
+  stub.
+
 ### Added (PR #3)
 - Typed Pydantic models in `src/repo_doc_governance/models.py` —
   `Classification`, `Severity`, `DocKind`, `ManifestKind`, `DocFile`,

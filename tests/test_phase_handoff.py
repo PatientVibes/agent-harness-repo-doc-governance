@@ -1,0 +1,74 @@
+"""Tests for Phase 6 — Handoff / TODO / ROADMAP cleanup."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from repo_doc_governance import llm_runtime
+from repo_doc_governance.llm_runtime import StubLLMRunner
+from repo_doc_governance.orchestrator import make_run_state
+from repo_doc_governance.phase_impls import drift_audit, handoff, survey
+from repo_doc_governance.phases import Task
+
+from conftest import build_clean_repo, build_drifted_repo
+
+
+@pytest.fixture(autouse=True)
+def _reset_runner():
+    llm_runtime.set_runner(None)
+    yield
+    llm_runtime.set_runner(None)
+
+
+def test_handoff_phase_uses_existing_handoff_file(tmp_path: Path):
+    repo = build_drifted_repo(tmp_path)
+    state = make_run_state(repo, Task.FULL_PASS)
+    survey.run(state)
+    drift_audit.run(state)
+
+    stub = StubLLMRunner(text="# Handoff\n\nClean.\n")
+    llm_runtime.set_runner(stub)
+    handoff.run(state)
+
+    assert "docs/HANDOFF.md" in stub.calls[0]["user_prompt"]
+    assert state.handoff_diff != ""
+    assert "a/docs/HANDOFF.md" in state.handoff_diff
+    assert "b/docs/HANDOFF.md" in state.handoff_diff
+
+
+def test_handoff_phase_falls_back_to_docs_path(tmp_path: Path):
+    repo = build_clean_repo(tmp_path)
+    state = make_run_state(repo, Task.FULL_PASS)
+    survey.run(state)
+
+    stub = StubLLMRunner(text="# Handoff\n\nNew.\n")
+    llm_runtime.set_runner(stub)
+    handoff.run(state)
+
+    # No existing HANDOFF — phase should target docs/HANDOFF.md.
+    assert "docs/HANDOFF.md" in stub.calls[0]["user_prompt"]
+
+
+def test_handoff_phase_passes_drift_findings_for_handoff_files(tmp_path: Path):
+    repo = build_drifted_repo(tmp_path)
+    state = make_run_state(repo, Task.FULL_PASS)
+    survey.run(state)
+    drift_audit.run(state)
+
+    stub = StubLLMRunner(text="# Handoff\n\nUpdated.\n")
+    llm_runtime.set_runner(stub)
+    handoff.run(state)
+
+    assert "stale_todo" in stub.calls[0]["user_prompt"]
+
+
+def test_handoff_phase_empty_response_leaves_diff_empty(tmp_path: Path):
+    repo = build_drifted_repo(tmp_path)
+    state = make_run_state(repo, Task.FULL_PASS)
+    survey.run(state)
+
+    llm_runtime.set_runner(StubLLMRunner(text=""))
+    handoff.run(state)
+    assert state.handoff_diff == ""
