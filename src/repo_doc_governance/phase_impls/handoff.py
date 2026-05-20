@@ -67,7 +67,10 @@ def run(state: RunState) -> RunState:
     if not proposed:
         return state
 
-    state.handoff_diff = unified_diff(repo, handoff_path, proposed + "\n")
+    body = proposed + "\n"
+    state.handoff_proposed = body
+    state.handoff_path = handoff_path
+    state.handoff_diff = unified_diff(repo, handoff_path, body)
     return state
 
 

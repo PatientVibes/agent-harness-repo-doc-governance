@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (PR #5)
+- `src/repo_doc_governance/safety.py` — load-bearing safety primitives:
+  `BranchPolicyError` / `PathOutsideRepoError` / `UntrackedFileError` /
+  `RefusedCommandError`. Each invariant from the design spec has both an
+  assert function and an integration test against a real temp git repo.
+- Refuse-list (`safety.refuse_list_match`) covering destructive
+  filesystem ops, credential / secret access, deployment commands,
+  production DB ops, package publishing, privileged container ops,
+  `curl | bash` / `wget | bash` style execution, and `sudo`. Used by
+  both Phase 8 Tier-2 (command execution gate) and as a defense-in-
+  depth gate when the LLM would emit a command in a doc.
+- **Phase 9 PR-format handoff** (`phase_impls/pr_handoff.py`) — builds
+  a `PRPlan` from `RunState`, sets `state.pr_body_draft` (always), and
+  when `state.execute_phase9` is True executes the plan: creates a
+  feature branch, applies file writes / deletes / moves with safety
+  gates, commits (only if HEAD is on a non-protected non-base branch),
+  pushes, and calls the configured `PRCreator` (default `GhPRCreator`).
+  **Never calls `gh pr merge`** — only `gh pr create`. The
+  `test_never_self_merge` test verifies this by asserting the
+  `NullPRCreator` test double has no `merge` method.
+- `src/repo_doc_governance/pr_creator.py` — abstracted `PRCreator`
+  Protocol + `GhPRCreator` (shells out to `gh`) + `NullPRCreator` (test
+  double). Phase 9 reads `phase_impls.pr_handoff.get_pr_creator()` so
+  tests can swap in a fake without monkeypatching subprocess.
+- `src/repo_doc_governance/pr_builder.py` — `PRPlan` dataclass +
+  `build_pr_plan(state)` pure-function. Renders the PR body from the
+  template in `prompts/templates.md`, populating Summary, Changes,
+  Source of truth, Verification, Not run, Needs verification,
+  Governance note from `RunState`. Untracked-by-git stale candidates
+  are filtered out of `files_to_delete` at the planner level (Phase 9
+  does another last-mile check at the delete step).
+- **Phase 8 Tier-2** added to `phase_impls/verification.py` — opt-in
+  via `state.execute_tier2 = True`. For each declared command, reads
+  the manifest script body, runs `safety.assert_command_safe(cmd,
+  body)` against the refuse-list, executes safe commands with a 120s
+  timeout, and records `command_execution` `VerificationResult` rows
+  (`ok=True` for exit-zero, `ok=False` for refused/non-zero/timeout).
+- RunState additions: `readme_proposed` / `agent_files_proposed` /
+  `handoff_proposed` / `handoff_path` (full bodies for Phase 9 to
+  write), `base_branch` (default `main`), `branch_prefix` (default
+  `doc-governance`), `execute_phase9` (default False — dry-run /
+  audit-mode), `execute_tier2` (default False), `pr_url`,
+  `pr_branch_name`.
+- Tests: `test_safety_invariants.py` (5 invariants × 1–4 cases each,
+  all hitting real `git init`/`git commit` against `tmp_path`),
+  `test_pr_builder.py` (planner output shape + dry-run branch isolation).
+  Suite total: **92 tests pass**.
+
 ### Added (PR #4)
 - `src/repo_doc_governance/llm_runtime.py` — `LLMRunner` protocol +
   `LLMRunResult` dataclass + `ReactLLMRunner` (default, wraps

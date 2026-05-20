@@ -72,8 +72,10 @@ def run(state: RunState) -> RunState:
         # template-driven "no existing docs" case in decisions.md).
         canonical_text = _generate_canonical(state, canonical_path, agent_files)
         if canonical_text:
+            body = canonical_text + "\n"
+            state.agent_files_proposed[canonical_path] = body
             state.agent_files_diff = _format_multifile_diff(
-                {canonical_path: unified_diff(repo, canonical_path, canonical_text + "\n")}
+                {canonical_path: unified_diff(repo, canonical_path, body)}
             )
         return state
 
@@ -82,13 +84,16 @@ def run(state: RunState) -> RunState:
         return state
 
     diffs: dict[str, str] = {}
-    diffs[canonical_path] = unified_diff(repo, canonical_path, canonical_text + "\n")
+    canonical_body = canonical_text + "\n"
+    state.agent_files_proposed[canonical_path] = canonical_body
+    diffs[canonical_path] = unified_diff(repo, canonical_path, canonical_body)
 
     wrapper_text = _build_wrapper(canonical_path)
     for df in agent_files:
         if df.path == canonical_path:
             continue
         # Only generate wrappers for files that aren't already the canonical.
+        state.agent_files_proposed[df.path] = wrapper_text
         diffs[df.path] = unified_diff(repo, df.path, wrapper_text)
 
     state.agent_files_diff = _format_multifile_diff(diffs)

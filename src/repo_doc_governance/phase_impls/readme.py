@@ -63,7 +63,9 @@ def run(state: RunState) -> RunState:
     if not proposed:
         return state
 
-    state.readme_diff = unified_diff(repo, readme_rel, proposed + "\n")
+    proposed_with_newline = proposed + "\n"
+    state.readme_proposed = proposed_with_newline
+    state.readme_diff = unified_diff(repo, readme_rel, proposed_with_newline)
     return state
 
 
