@@ -166,3 +166,85 @@ def test_is_aspirational_doc_matches_plan_dirs():
     assert not drift_audit.is_aspirational_doc("docs/HANDOFF.md")
     assert not drift_audit.is_aspirational_doc("docs/ARCHITECTURE.md")
     assert not drift_audit.is_aspirational_doc("AGENTS.md")
+
+
+# ---- Code-fence stripping --------------------------------------------------
+
+
+def test_links_inside_code_fence_are_skipped(tmp_path: Path):
+    """A `[text](target.md)` link inside ```...``` is an example, not a
+    real link. Phase 3 must not flag it as broken.
+    """
+    import subprocess
+
+    repo = tmp_path / "fence"
+    repo.mkdir()
+    (repo / "README.md").write_text(
+        "# fence-fixture\n\n"
+        "Here's an example of what to write elsewhere:\n\n"
+        "```markdown\n"
+        "See [Contributing](./CONTRIBUTING.md) for guidance.\n"
+        "Also see [Specs](specs/foo.md).\n"
+        "```\n\n"
+        "And a real broken link: [broken](docs/missing.md)\n",
+        encoding="utf-8"
+    )
+    (repo / "package.json").write_text('{"scripts": {}}', encoding="utf-8")
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=str(repo), check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=str(repo), check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=str(repo), check=True)
+    subprocess.run(["git", "add", "."], cwd=str(repo), check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "i"], cwd=str(repo), check=True)
+
+    state = _run_through_phase3(repo)
+
+    broken = [f for f in state.drift_findings if f.kind == "broken_internal_link"]
+    # The two links inside the code fence should NOT be flagged. Only the
+    # one outside (docs/missing.md) should land as a finding.
+    assert len(broken) == 1
+    assert "docs/missing.md" in broken[0].detail
+
+
+def test_fenced_code_lines_helper():
+    """Unit test of the line-set builder. Closing ``` toggles back out."""
+    text = (
+        "intro\n"
+        "```python\n"
+        "code line 1\n"
+        "code line 2\n"
+        "```\n"
+        "outside again\n"
+    )
+    fenced = drift_audit._fenced_code_lines(text)
+    # 1-indexed. Lines 2-5 are in the fence (open marker + body + close marker).
+    assert 1 not in fenced
+    assert 2 in fenced
+    assert 3 in fenced
+    assert 4 in fenced
+    assert 5 in fenced
+    assert 6 not in fenced
+
+
+def test_template_placeholder_links_are_skipped(tmp_path: Path):
+    """Links containing `${...}` or `{{...}}` are template placeholders
+    (e.g. in Astro / Mustache examples) — never real targets."""
+    import subprocess
+
+    repo = tmp_path / "tmpl"
+    repo.mkdir()
+    (repo / "README.md").write_text(
+        "# tmpl\n\n"
+        "Astro example: [Doc](${base}/docs/foo.md)\n"
+        "Mustache: [Path]({{path}}.md)\n",
+        encoding="utf-8"
+    )
+    (repo / "package.json").write_text('{"scripts": {}}', encoding="utf-8")
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=str(repo), check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=str(repo), check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=str(repo), check=True)
+    subprocess.run(["git", "add", "."], cwd=str(repo), check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "i"], cwd=str(repo), check=True)
+
+    state = _run_through_phase3(repo)
+    broken = [f for f in state.drift_findings if f.kind == "broken_internal_link"]
+    assert broken == []

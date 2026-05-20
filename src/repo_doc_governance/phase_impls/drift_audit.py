@@ -123,14 +123,22 @@ def run(state: RunState) -> RunState:
 def _audit_internal_links(repo: Path, doc: DocFile, text: str) -> list[DriftFinding]:
     out: list[DriftFinding] = []
     doc_dir = (repo / doc.path).parent
+    in_fence = _fenced_code_lines(text)
 
     for line_no, line in enumerate(text.splitlines(), start=1):
+        if line_no in in_fence:
+            # Inside a ``` fenced code block — author is showing an
+            # example, not asserting a link. Skip.
+            continue
         for match in _MD_LINK_RE.finditer(line):
             target = match.group("target").strip()
             if not target:
                 continue
             # Skip external URLs and pure anchors.
             if target.startswith(("http://", "https://", "mailto:", "#")):
+                continue
+            # Skip template placeholders (`${foo}`, `{{foo}}`).
+            if "${" in target or "{{" in target:
                 continue
             # Strip anchor + query
             link_path = target.split("#", 1)[0].split("?", 1)[0]
@@ -153,6 +161,28 @@ def _audit_internal_links(repo: Path, doc: DocFile, text: str) -> list[DriftFind
                     )
                 )
     return out
+
+
+def _fenced_code_lines(text: str) -> set[int]:
+    """Return the set of 1-indexed line numbers that lie inside ``` fences.
+
+    Treats every ``` (with optional language tag) as toggling fenced-ness.
+    Lines on the fence markers themselves are also marked fenced so a
+    closing ``` is never treated as in-content. Robust to nested fences
+    of the same depth — markdown doesn't really support nested fences,
+    so we don't either.
+    """
+    fenced: set[int] = set()
+    in_fence = False
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        stripped = line.lstrip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            fenced.add(line_no)
+            continue
+        if in_fence:
+            fenced.add(line_no)
+    return fenced
 
 
 # ---------------------------------------------------------------------------

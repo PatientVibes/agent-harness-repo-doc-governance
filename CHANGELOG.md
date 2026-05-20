@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed (v0.1.x follow-up — plan-doc scope exemption)
+### Changed (v0.1.x follow-up — drift-audit FP suppression)
 - Phase 3 (drift audit) now demotes `dead_command` findings inside
   plan / spec / design / proposal / RFC docs to
   `dead_command_in_aspirational_doc` with severity `Low` and
@@ -16,11 +16,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/superpowers/plans/**`, `docs/superpowers/specs/**`,
   `docs/plans/**`, `docs/specs/**`, `docs/design/**`,
   `docs/proposals/**`, `docs/rfcs/**`.
-- **Why:** dogfood pass against the sibling repos surfaced this FP class
-  — `agent-harness-card-extractor`'s `docs/superpowers/plans/*-frontend.md`
-  references `npm run dev` / `npm test` because the planned frontend
-  hasn't shipped. The command isn't drift; it describes a future state.
-  Demoting (rather than dropping) preserves the signal for human review.
+- **Code-fence stripping.** Phase 3 link/command audit now skips any
+  line that lies inside a ` ``` ` fenced code block. Authors routinely
+  embed markdown EXAMPLES inside code fences (e.g. "paste this row into
+  the README table") — those `[text](target)` patterns are
+  demonstrations, not real links. Same fence-tracker prevents
+  false-positive dead-command flags from inside ``` shell blocks too.
+- **Template placeholder skip.** Links whose target contains `${...}`
+  (Astro / shell-interp) or `{{...}}` (Mustache / Handlebars) are
+  template fragments by definition, not real paths — skipped.
+- **Why:** dogfood pass against the sibling repos surfaced both FP
+  classes. The plan-doc demotion came from
+  `agent-harness-card-extractor`'s `docs/superpowers/plans/*-frontend.md`
+  references to `npm run dev` for a planned-but-unshipped frontend.
+  The code-fence / template-placeholder skips came from auditing
+  `ai-agents`, which (pre-fix) flagged 27 "broken internal links"
+  almost all of which were inside ```markdown blocks documenting
+  what to paste into OTHER files. Post-fix, the same audit returns
+  zero false-positive broken links.
 
 ## [0.1.0] — 2026-05-19
 
