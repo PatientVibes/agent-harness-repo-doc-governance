@@ -35,7 +35,12 @@ jobs:
         run: uv sync --frozen
 
       - name: Run audit (--fail-on high)
+        # `set -o pipefail` makes the pipeline return the exit code of
+        # the FIRST failing command rather than `tee`'s (which always
+        # exits 0). Without this, --fail-on high is silently a no-op.
+        shell: bash
         run: |
+          set -o pipefail
           uv run repo-doc-gov audit \
             --repo . \
             --fail-on high \
