@@ -5,6 +5,66 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] — 2026-05-20
+
+Two bugs surfaced by the v0.1.3 real-LLM dogfood against
+`agent-harness-card-extractor` (closed PR
+`PatientVibes/agent-harness-card-extractor#2`). Cost of that one run
+was \$2.47 with Sonnet 4.6 — both fixes are required to make the
+harness production-usable against any plan-doc-heavy target.
+
+### Fixed (LLM preamble leakage defeated Phase 9 no-change short-circuit)
+
+Sonnet 4.6 emits chain-of-thought / meta-commentary prose ABOVE the
+first H1 of every LLM phase output, in violation of the explicit
+"Output raw markdown only" hard rule. Examples from the closed
+dogfood PR:
+
+- `README.md` (Phase 4): `No drift was flagged and the repo contents
+  confirm all existing README content is accurate. The README is
+  output verbatim.`
+- `AGENTS.md` (Phase 5): `Now I have a thorough understanding of the
+  repo. The manifests declare no runnable commands directly...`
+- `docs/HANDOFF.md` (Phase 6): `Now I have a thorough understanding
+  of the repository. Let me write the HANDOFF file.`
+
+The Phase 9 no-change short-circuit (shipped in v0.1.2) was defeated
+because the preamble creates a diff against the existing file —
+v0.1.3 shipped "preamble added" PRs for what should have been
+no-ops. Gemini 2.5 Pro did not produce this in the v0.1.2 dogfood;
+model-family-specific behavior. Closes #27 (PR #29).
+
+- **New `phase_impls/_llm_output.py::strip_llm_preamble`** — finds
+  the first `# ` H1 in the model output and drops everything before
+  it. No-op when output is already clean; returns the input
+  unchanged when no H1 is present (so an operator can still
+  inspect). Trailing-newline-preserving.
+- Called from Phases 4, 5, and 6 immediately after `result.text.strip()`.
+
+### Fixed (Phase 6 input bloat from inlining aspirational plan/spec docs)
+
+v0.1.3 PR #21 added "inline every handoff/TODO/ROADMAP file" to the
+Phase 6 prompt. The dogfood target's big aspirational plan docs
+under `docs/superpowers/plans/` (one was 1,319 lines) were classified
+as handoff content by the survey and inlined verbatim — **728,634
+input tokens** for a single Phase 6 call, **\$2.18 cost** (25×
+regression vs v0.1.2's ~\$0.10 on pdf-builder). Closes #28 (PR #30).
+
+- **Phase 6 now filters `inv.handoff_files` through
+  `drift_audit.is_aspirational_doc(...)`** — the same classifier
+  Phase 3 already uses to demote drift findings in plan/spec dirs.
+  Plan / spec / design / proposal / RFC docs are excluded from the
+  Phase 6 prompt's "CURRENT HANDOFF / TODO / ROADMAP FILES" inlined
+  section AND the `handoff_findings` list.
+- The long-term cleaner shape — classify plan/spec docs at survey
+  time so they're never in `inv.handoff_files` — is deferred. This
+  patch is the minimum-viable cost gate.
+
+### Test count
+
+127 tests + 1 opt-in `-m integration` test (which now passes against
+Haiku 4.5 with both fixes in place). Was 125 in v0.1.3.
+
 ## [0.1.3] — 2026-05-20
 
 ### Added (Phase 5 + Phase 6 prompt tightening — same anti-pattern as Phase 4 pre-v0.1.2)
