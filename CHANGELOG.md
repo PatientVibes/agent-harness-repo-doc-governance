@@ -5,7 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.1] — 2026-05-20
+
+### Added (CI gate rollout)
+- `.github/workflows/audit.yml` and `.github/workflows/pytest.yml` —
+  self-policing CI on this repo. Audit gates merges on High/Blocker
+  drift findings; pytest gates on the test suite. Both run on a
+  repo-scoped self-hosted runner on `gh-runner.mshome.net` (labels
+  `[self-hosted, repo-doc-gov]`). Audit mode is read-only and never
+  invokes an LLM, so no API key required in CI.
+- Documents the rollout pattern for replicating the audit gate to
+  sibling repos (`uv tool install agent-harness-repo-doc-governance @
+  git+...@v0.1.1`).
+
+### Changed (v0.1.x follow-up — token tracker + pipeline trace wiring)
+- `RunState` now carries a `token_tracker: TokenTracker` (always
+  present, accumulator-style — see `agent-tool-token-tracker`) and an
+  optional `pipeline_trace: PipelineTrace` (instantiated by the
+  orchestrator iff `state.trace_path` is set — see
+  `agent-tool-pipeline-trace`).
+- The orchestrator emits `pipeline_start`, per-phase
+  `phase_start` / `phase_end`, `pipeline_end`, and `error` events into
+  the trace file when configured. LLM phases (4, 5, 6) emit an
+  `llm_call` event and record token usage on the tracker via
+  `phase_impls/_observability.record_llm_call`.
+- `summary(state)` now includes `token_usage` (per-source totals).
+- CLI: `run` and `audit` both gained `--trace PATH` to write a JSONL
+  pipeline trace alongside the run.
+- **Bug fix:** `README_ONLY` task now includes Phase 1 (Survey).
+  Without it, Phase 4 (README) bailed early on `state.inventory is None`.
 
 ### Changed (v0.1.x follow-up — drift-audit FP suppression)
 - Phase 3 (drift audit) now demotes `dead_command` findings inside
