@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] — 2026-05-20
+
+### Added (Phase 3: deterministic env-var coverage audit)
+
+The v0.1.4 dogfood against `agent-harness-card-extractor` showed the
+LLM Phase 4 pass finding 6 of 8 missing env-var rows but silently
+dropping `ENABLE_AUDIT` / `ENABLE_PREPROCESSING`. "Env var referenced
+in code but absent from README" is deterministic; Phase 3 now
+produces these findings so Phase 4 only has to render the row, not
+discover it. Closes #34 (PR #37).
+
+- New `_audit_undocumented_env_vars(state)` walks `git ls-files`-
+  tracked `.py` files and matches three Python read patterns:
+  `os.environ.get`, `os.getenv`, and `os.environ['X']` excluding
+  writes (negative lookahead on `=`).
+- Documented-name extractor matches all-caps tokens (≥4 chars) inside
+  backticks in the README — the documented convention.
+- New `env_var_undocumented` finding kind at `Severity.MEDIUM` +
+  `Classification.UPDATE`, pointed at the README.
+- FP guards: secret-name suffixes (`_KEY` / `_TOKEN` / `_SECRET` /
+  `_PASSWORD` / `_PASSPHRASE` / `_CREDENTIAL[S]` / `_API_KEY` /
+  `_ACCESS_KEY` / `_PRIVATE_KEY`) are suppressed — these typically
+  live in README prose, not the env-var table.
+- Scope: Python first. JS (`process.env.X`), Rust (`std::env::var`),
+  Go (`os.Getenv`) can land under the same shape in follow-ups.
+
+### Test count
+
+144 tests + 1 opt-in `-m integration` test. Was 140 in v0.1.5.
+
 ## [0.1.5] — 2026-05-20
 
 ### Fixed (Phase 9 stale-branch edge case: HEAD on the stale branch)
