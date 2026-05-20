@@ -32,13 +32,39 @@ SYSTEM_PROMPT = (
     "Workflow rules to follow (vendored from prompts/phases.md Phase 4 + "
     "prompts/templates.md README template):\n\n"
     "{phases_section}\n\n"
-    "Template skeleton — include only the sections that apply:\n\n"
+    "Template skeleton — use ONLY as a reference for what sections "
+    "*could* exist. NEVER add a section just because it's in the template "
+    "skeleton; you must have factual, repo-specific content to put in it.\n\n"
     "{template_section}\n\n"
-    "Hard rules:\n"
-    "- Verify every command against the manifests provided. Do not invent commands.\n"
-    "- If a fact cannot be confirmed from the data given, write 'Needs verification' explicitly.\n"
-    "- Do not duplicate long content from deeper docs — link instead.\n"
-    "- Output raw markdown only. No code fences around the whole document."
+    "## Hard rules (load-bearing — violating these is the failure mode "
+    "this phase exists to prevent)\n\n"
+    "1. **PRESERVE all existing content that the drift findings did NOT flag.** "
+    "If the current README has a section, a sentence, a code example, a "
+    "cross-repo reference, a link, or an origin/migration note — and it isn't "
+    "in the drift findings list — it MUST appear in your output, byte-faithful "
+    "where reasonable. You are updating a document, not writing a new one.\n\n"
+    "2. **DO NOT rename the title.** The current README's first-line H1 is the "
+    "canonical project name. Keep it verbatim.\n\n"
+    "3. **OMIT empty sections.** If you would only be able to write "
+    "'Needs verification' as a section's body (or some equivalent filler), "
+    "leave the section out entirely. The README is not a template skeleton — "
+    "it is a document that contains the facts that exist.\n\n"
+    "4. **Manifest-faithful commands.** The user prompt lists every command "
+    "declared in this repo's manifests. Quote those EXACTLY. NEVER substitute "
+    "`pip install` when the manifest declares `uv tool install`. NEVER "
+    "substitute `npm test` when the manifest declares `pytest`. The repo's "
+    "actual convention is the only correct convention to document.\n\n"
+    "5. **Cross-repo references are content, not boilerplate.** Sentences like "
+    "\"Used as a library by `agent-tool-X`\" or \"Migrated from `path/Y`\" are "
+    "load-bearing facts. NEVER drop them silently — they survive into the new "
+    "README under the appropriate section (Status, Repository structure, "
+    "Origin, etc.).\n\n"
+    "6. **`Needs verification` items survive as `Needs verification` items**, "
+    "not as deletions. If a drift finding has classification "
+    "`Needs verification`, surface it in a clearly-marked section the human "
+    "reviewer can act on; do not silently remove the line from the README.\n\n"
+    "7. **Output raw markdown only.** No code fences around the whole "
+    "document. No prose commentary before or after."
 )
 
 
@@ -92,7 +118,18 @@ def _build_user_prompt(state: RunState, readme_rel: str) -> str:
     parts.append(f"Branch: {inv.branch or '(detached or none)'}")
     parts.append(f"Working tree clean: {inv.is_clean}")
 
-    parts.append("\n## Manifests")
+    # --- The current README content. Without this, the LLM has no way to
+    # honor the "preserve existing content" rule and falls back to
+    # writing from the template skeleton. This is the load-bearing
+    # context — it goes first in the prompt body.
+    current = _read_current_readme(state.target_repo, readme_rel)
+    parts.append("\n## CURRENT README CONTENT (preserve all of this unless flagged as drift)")
+    parts.append("")
+    parts.append("```markdown")
+    parts.append(current if current else "(empty or unreadable; create from scratch using the template skeleton)")
+    parts.append("```")
+
+    parts.append("\n## Manifests (the ONLY commands you may quote)")
     for m in inv.manifests:
         cmds = ", ".join(m.declared_commands) if m.declared_commands else "(no commands)"
         parts.append(f"- `{m.path}` ({m.kind.value}) → {cmds}")
@@ -115,9 +152,24 @@ def _build_user_prompt(state: RunState, readme_rel: str) -> str:
         f for f in state.drift_findings if f.path == readme_rel
     ]
     if readme_findings:
-        parts.append("\n## Drift findings on README")
+        parts.append("\n## Drift findings on README (these — and ONLY these — should change in the new README)")
         for f in readme_findings:
             parts.append(f"- [{f.severity.value}] {f.kind}: {f.detail}")
+    else:
+        parts.append("\n## Drift findings on README")
+        parts.append(
+            "(none — the README has no flagged drift. Your output should be "
+            "byte-faithful to the current content unless you have a "
+            "specific manifest-grounded fact to add. If there is nothing to "
+            "change, output the current README verbatim.)"
+        )
 
     parts.append("\nProduce the updated README.md body now. Raw markdown only.")
     return "\n".join(parts)
+
+
+def _read_current_readme(repo: Path, rel_path: str) -> str:
+    try:
+        return (repo / rel_path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""

@@ -85,3 +85,28 @@ def test_readme_phase_passes_drift_findings(tmp_path: Path):
     call = stub.calls[0]
     assert "dead_command" in call["user_prompt"]
     assert "npm run deploy" in call["user_prompt"]
+
+
+def test_readme_phase_includes_current_readme_content(tmp_path: Path):
+    """Load-bearing — the LLM must see the EXISTING README content so it
+    can honor the preserve-existing-content rule. Without this, the LLM
+    falls back to writing from the template skeleton, producing the
+    "rewriting for tone only" anti-pattern that prompts/decisions.md
+    warns against.
+    """
+    repo = build_clean_repo(tmp_path)
+    # The clean-repo fixture's README has a recognizable marker.
+    state = _through_phase3(repo)
+
+    stub = StubLLMRunner(text="# clean-fixture\n\nbody\n")
+    llm_runtime.set_runner(stub)
+    readme.run(state)
+
+    user_prompt = stub.calls[0]["user_prompt"]
+    assert "CURRENT README CONTENT" in user_prompt
+    # The clean-repo's README literally has this `npm test` quoted text;
+    # verify it survives into the user prompt.
+    assert "npm test" in user_prompt
+    # And the explicit "preserve all of this unless flagged" instruction.
+    assert "preserve all of this unless flagged" in user_prompt.lower() or \
+           "preserve" in user_prompt
