@@ -5,16 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.3] — 2026-05-20
 
 ### Added (Phase 5 + Phase 6 prompt tightening — same anti-pattern as Phase 4 pre-v0.1.2)
 
 Phases 5 and 6 previously pushed the LLM to fetch existing files via a
 `read_file` tool. That design was never validated against a real LLM,
 and the Phase 4 v0.1.2 fix is strong evidence that inlining the current
-content directly in the prompt is the more robust pattern. This PR
-applies the same fix to Phase 5 (agent instructions) and Phase 6
-(handoff / TODO / ROADMAP). Closes #12.
+content directly in the prompt is the more robust pattern. The same fix
+now applies to Phase 5 (agent instructions) and Phase 6 (handoff / TODO
+/ ROADMAP). Closes #12 (PR #21).
 
 - **Phase 5 user prompt now includes the body of every existing
   agent-instruction file** under a "CURRENT AGENT-INSTRUCTION FILES
@@ -32,9 +32,79 @@ applies the same fix to Phase 5 (agent instructions) and Phase 6
   (unless drift-flagged), no-title-renames, omit-empty-sections,
   manifest-faithful commands, cross-repo references are content,
   `Needs verification` items survive, raw markdown output only.
-- Tests: `test_phase5_includes_current_agent_file_content` and
-  `test_phase6_includes_current_handoff_content` gate the load-bearing
-  user-prompt fixes. 119 tests total.
+
+### Added (Phase 4 preserve-edit path real-LLM integration test)
+
+Closes the dogfood loop opened by v0.1.2 — that release validated the
+no-drift path (LLM returns byte-identical content, Phase 9 short-
+circuits); this one validates the **preserve-while-editing** path.
+Closes #13 (PR #22).
+
+- **New opt-in integration test** at
+  `tests/test_phase4_preserve_edit_integration.py` runs Phase 4
+  against the existing `build_drifted_repo` fixture (1 dead `npm`
+  command + 1 broken link + valid `npm install` content) with a real
+  LLM (Anthropic Haiku 4.5 via direct or OpenRouter route).
+- Asserts the title is preserved verbatim, valid content survives,
+  drift is removed, and the LLM does not invent `Needs verification`
+  filler sections.
+- Gated by `@pytest.mark.integration` + skipif on key availability
+  (and `langchain_anthropic` importability for the Anthropic-direct
+  route). Cost < $0.05 per run with Haiku 4.5.
+- README "Quick start" updated with the `pytest -m integration`
+  invocation + one-line cost note.
+
+### Fixed (Phase 9 stale-local-branch recovery)
+
+Phase 9 failures between `git checkout -b` and `gh pr create` left a
+stale local feature branch, causing the next run's `git checkout -b`
+to exit 128. Hit twice during the v0.1.2 real-LLM dogfood and
+required manual `git branch -D` to recover. Closes #15 (PR #23).
+
+- **New `_delete_stale_local_branch_if_present` helper** detects the
+  stale branch via `git rev-parse --verify --quiet refs/heads/<name>`
+  and force-deletes via `git branch -D` before `git checkout -b`.
+- Cleanup is visible to the operator: a one-line stderr warning plus
+  a `phase9_stale_branch_deleted` trace event when tracing is on.
+
+### Fixed (refuse-list documentation false positives)
+
+Phase 3 was flagging `npm publish` (and similar) as a high-severity
+`dead_command` whenever it appeared in refuse-list / blocklist
+documentation context — e.g. ``Tier-2 refuse-list — `npm publish`,
+`kubectl apply` ``. Surfaced on the harness's own README during the
+first audit-workflow run (v0.1.1 retro). Closes #14 (PR #24).
+
+- **New `_line_is_refuse_list_documentation(line)` helper** (case-
+  insensitive, word-boundary regex on `refuse|refused|refuses|refuse-list
+  |blocked|blocklist|denylist|rejected|forbidden|disallowed`). Same
+  shape as the existing `is_aspirational_doc` path.
+- When context matches, records a `dead_command_in_refuse_list_documentation`
+  finding at `Severity.INFO` + `Classification.KEEP` — transparency
+  in the audit without triggering Phase 4 to "fix" it.
+
+### Fixed (circular import surfaced by isolated test-file runs)
+
+`pytest tests/test_safety_invariants.py` (or any standalone test-file
+invocation) failed at collection with `ImportError: cannot import name
+'RunState' from partially initialized module 'repo_doc_governance.state'`.
+Full-suite runs masked it because earlier files pre-populated
+`sys.modules`. Closes #16 (PR #25).
+
+- **`phase_impls/__init__.py` no longer eagerly imports phase modules.**
+  `phases.py:_build_dispatch()` (which already does the lazy imports)
+  is now the sole entry point and the cycle breaks. Per the issue's
+  recommended option (1).
+- New `tests/test_imports.py` with 3 subprocess-based regression gates
+  so the fix can't be silently undone:
+  `test_safety_module_imports_in_isolation`,
+  `test_safety_invariants_test_file_imports_in_isolation`,
+  `test_phase_impls_init_does_not_eagerly_load_phase_modules`.
+
+### Test count
+
+125 tests + 1 opt-in `-m integration` test (skips by default).
+Was 117 in v0.1.2.
 
 ## [0.1.2] — 2026-05-20
 
