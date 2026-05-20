@@ -168,6 +168,8 @@ def _run_tier2(state: RunState) -> None:
 
 
 def _check_internal_links(repo: Path, doc: DocFile) -> list[VerificationResult]:
+    from repo_doc_governance.phase_impls.drift_audit import _fenced_code_lines
+
     abs_path = repo / doc.path
     try:
         text = abs_path.read_text(encoding="utf-8", errors="replace")
@@ -175,24 +177,30 @@ def _check_internal_links(repo: Path, doc: DocFile) -> list[VerificationResult]:
         return []
     out: list[VerificationResult] = []
     doc_dir = abs_path.parent
-    for match in _MD_LINK_RE.finditer(text):
-        target = match.group("target").strip()
-        if not target:
+    fenced = _fenced_code_lines(text)
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        if line_no in fenced:
             continue
-        if target.startswith(("http://", "https://", "mailto:", "#")):
-            continue
-        link_path = target.split("#", 1)[0].split("?", 1)[0]
-        if not link_path or not link_path.endswith(".md"):
-            continue
-        resolved = (doc_dir / link_path).resolve()
-        out.append(
-            VerificationResult(
-                check="internal_link_resolves",
-                target=f"{doc.path} -> {target}",
-                ok=resolved.exists(),
-                detail="" if resolved.exists() else "Target does not exist on disk.",
+        for match in _MD_LINK_RE.finditer(line):
+            target = match.group("target").strip()
+            if not target:
+                continue
+            if target.startswith(("http://", "https://", "mailto:", "#")):
+                continue
+            if "${" in target or "{{" in target:
+                continue
+            link_path = target.split("#", 1)[0].split("?", 1)[0]
+            if not link_path or not link_path.endswith(".md"):
+                continue
+            resolved = (doc_dir / link_path).resolve()
+            out.append(
+                VerificationResult(
+                    check="internal_link_resolves",
+                    target=f"{doc.path} -> {target}",
+                    ok=resolved.exists(),
+                    detail="" if resolved.exists() else "Target does not exist on disk.",
+                )
             )
-        )
     return out
 
 
