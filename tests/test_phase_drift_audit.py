@@ -364,6 +364,73 @@ def test_env_var_writes_are_not_treated_as_reads(tmp_path: Path):
     )
 
 
+def test_env_var_detector_skips_test_files(tmp_path: Path):
+    """Closes #40: test files contain fixture string literals like
+    `os.environ.get("FAKE_VAR")` inside test bodies. The detector
+    can't distinguish those from real code, so it must skip
+    `tests/` directories, `test_*.py` / `*_test.py` filenames, and
+    `conftest.py`. Otherwise the harness's own audit produces 6
+    medium-severity FPs against its own test fixtures.
+    """
+    import subprocess
+
+    repo = tmp_path / "tf"
+    repo.mkdir()
+    (repo / "README.md").write_text("# tf\n", encoding="utf-8")
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname='tf'\nversion='0.0.1'\n", encoding="utf-8"
+    )
+    # Real source — must be flagged.
+    (repo / "app.py").write_text(
+        "import os\n"
+        "real = os.environ.get('REAL_CONSUMED_VAR', 'x')\n",
+        encoding="utf-8",
+    )
+    # Test directory — must be skipped.
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_app.py").write_text(
+        "import os\n"
+        "# Fixture string — not a real env-var consumption.\n"
+        "fixture = os.environ.get('FROM_TESTS_DIR_PATH', 'fake')\n",
+        encoding="utf-8",
+    )
+    # test_*.py at the repo root — must be skipped.
+    (repo / "test_smoke.py").write_text(
+        "import os\n"
+        "smoke = os.environ.get('FROM_ROOT_TEST_PREFIX', 'fake')\n",
+        encoding="utf-8",
+    )
+    # *_test.py — must be skipped (Go-style naming).
+    (repo / "smoke_test.py").write_text(
+        "import os\n"
+        "go_style = os.environ.get('FROM_GO_STYLE_TEST_SUFFIX', 'fake')\n",
+        encoding="utf-8",
+    )
+    # conftest.py — must be skipped.
+    (repo / "conftest.py").write_text(
+        "import os\n"
+        "conf = os.environ.get('FROM_CONFTEST', 'fake')\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=str(repo), check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=str(repo), check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=str(repo), check=True)
+    subprocess.run(["git", "add", "."], cwd=str(repo), check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "i"], cwd=str(repo), check=True)
+
+    state = _run_through_phase3(repo)
+    flagged = sorted(
+        f.detail.split("`")[1]
+        for f in state.drift_findings
+        if f.kind == "env_var_undocumented"
+    )
+    # Only the real source-file consumption surfaces; the four
+    # test-file variants are correctly skipped.
+    assert flagged == ["REAL_CONSUMED_VAR"], (
+        f"Test files leaked into env-var detector. Got: {flagged}"
+    )
+
+
 def test_clean_repo_has_no_env_var_findings(tmp_path: Path):
     """The clean-repo fixture has a Node README + `src/index.js`, no
     Python at all. Audit must produce zero env-var findings."""
