@@ -1,6 +1,6 @@
 [project]
 name = "agent-harness-repo-doc-governance"
-version = "0.1.6"
+version = "0.1.7"
 description = "Portable LangChain harness for repo documentation cleanup + AI-agent instruction consolidation. Outputs a PR, not a merge. 12-component agent harness."
 requires-python = ">=3.11"
 license = { text = "MIT" }
