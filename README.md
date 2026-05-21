@@ -82,6 +82,17 @@ LLM-route notes:
 - `OPENROUTER_API_KEY` → default model `openrouter/google/gemini-2.5-pro`. Uses `langchain-openai` (already a hard dep).
 - `ANTHROPIC_API_KEY` (no OpenRouter key set) → default model `anthropic:claude-sonnet-4-6`. **Requires `uv pip install langchain-anthropic`** — it's not a hard dep because OpenRouter covers Anthropic routes too. If you skip this install, the integration test self-skips and a real `run` will fail at `_make_llm()`.
 
+Env vars can also be stashed in `${XDG_CONFIG_HOME:-~/.config}/repo-doc-gov/env` (mode 600) — `repo-doc-gov` auto-sources the file on every invocation. Caller-set env always wins, so this is fallback, never override:
+
+```bash
+mkdir -p ~/.config/repo-doc-gov
+cat > ~/.config/repo-doc-gov/env <<'EOF'
+OPENROUTER_API_KEY=sk-or-...
+GH_TOKEN=gh_...
+EOF
+chmod 600 ~/.config/repo-doc-gov/env
+```
+
 ### 3. Modes
 
 **Audit** — read-only drift report, no LLM, fastest CI gate:
@@ -183,7 +194,7 @@ Three PatientVibes tools are pulled from GitHub via `[tool.uv.sources]` in `pypr
 
 | Variable | Required | Description |
 |---|---|---|
-| `OPENROUTER_API_KEY` *or* `ANTHROPIC_API_KEY` | Manual / batch modes | LLM provider key for Phases 4/5/6. The `ANTHROPIC_API_KEY` route additionally requires `uv pip install langchain-anthropic`. |
+| `OPENROUTER_API_KEY` *or* `ANTHROPIC_API_KEY` | Manual / batch modes | LLM provider key for Phases 4/5/6. The `ANTHROPIC_API_KEY` route additionally requires `uv pip install langchain-anthropic`. Fallback: `${XDG_CONFIG_HOME:-~/.config}/repo-doc-gov/env` (mode 600) is auto-sourced; caller-set env wins. |
 | `GH_TOKEN` | Unattended manual / batch modes | GitHub PR creation. Falls back to `gh auth status` for human-invoked runs. |
 
 ## 12-component harness implementation
