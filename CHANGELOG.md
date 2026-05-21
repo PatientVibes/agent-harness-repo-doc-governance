@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] — 2026-05-20
+
+Two follow-ups from the README §Usage doc PR (#39): one fixes the
+new env-var detector's FPs against the harness's own audit, the
+other ships the config-env-loading the README originally promised.
+
+### Fixed (env-var detector: skip tests/ + switch to AST)
+
+The v0.1.6 detector produced 6 medium-severity FPs in the harness
+self-audit — 4 from `tests/test_phase_drift_audit.py` fixture
+string literals, 2 from `drift_audit.py`'s own comments/docstrings
+that describe example regex matches. Closes #40 (PR #42).
+
+- New `_is_test_file()` filter excludes `tests/`, `test/`, `test_*.py`,
+  `*_test.py`, and `conftest.py` — test fixtures contain Python code
+  as string literals that the detector can't tell apart from real
+  code.
+- Source scan switched from regex to AST. Walks `ast.parse(text)` for
+  `Call` to `os.environ.get` / `os.getenv` and `Subscript` on
+  `os.environ` in `Load` context. Comments aren't in the AST;
+  docstrings are `Constant` nodes (not `Call`/`Subscript`), so the
+  example-regex chatter in `drift_audit.py`'s own source no longer
+  self-matches. Writes vs reads now distinguished by `Load`/`Store`
+  context — no more negative-lookahead heuristic.
+- Drops the now-unused `_ENV_PYTHON_PATTERNS` regex tuple.
+
+Verified: `repo-doc-gov audit --repo .` against the harness now
+returns **0** drift findings (was 6 in v0.1.6).
+
+### Added (config-env-loading: `~/.config/repo-doc-gov/env` auto-source)
+
+The original README claimed `OPENROUTER_API_KEY` / `ANTHROPIC_API_KEY`
+would auto-source from `${XDG_CONFIG_HOME:-~/.config}/repo-doc-gov/env`
+(mode 600). The `config-env-loading` pattern exists in sibling tools
+(e.g. `agent-tool-llm-proofreader`) but the harness never implemented
+it — PR #39 corrected the doc; this PR ships the feature. Closes #41
+(PR #43).
+
+- New `cli._load_config_env()` runs at the top of `main()`. Uses
+  `python-dotenv` (already a hard dep) with `override=False` so
+  caller-set env always wins. Sibling-tool precedent.
+- POSIX: stderr warning when the file has group/world bits set;
+  still loads.
+- README's §Environment variables row + §Usage / Authentication
+  updated with the worked example.
+
+### Test count
+
+148 tests + 1 POSIX-only skipped on Windows. Was 144 in v0.1.6.
+
 ## [0.1.6] — 2026-05-20
 
 ### Added (Phase 3: deterministic env-var coverage audit)
