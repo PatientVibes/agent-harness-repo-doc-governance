@@ -23,6 +23,7 @@ Each finding gets a `Classification` from `prompts/decisions.md`:
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -417,15 +418,6 @@ def _audit_conflicting_agent_files(state: RunState) -> list[DriftFinding]:
 # README" is deterministic; Phase 3 should produce these findings so Phase
 # 4 only has to render them, not discover them.
 
-# Python read patterns. `os.environ["X"]` is matched only as a READ
-# (no trailing `=`); writes (`os.environ["X"] = ...`) are excluded
-# downstream.
-_ENV_PYTHON_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"""os\.environ\.get\(\s*["']([A-Z_][A-Z0-9_]*)["']"""),
-    re.compile(r"""os\.getenv\(\s*["']([A-Z_][A-Z0-9_]*)["']"""),
-    re.compile(r"""os\.environ\[\s*["']([A-Z_][A-Z0-9_]*)["']\s*\](?!\s*=[^=])"""),
-)
-
 # Env-var names whose suffix marks them as a secret. Secrets are
 # referenced separately under the README's prose / "Environment variables"
 # preamble, not as table rows — flagging them as undocumented produces FPs.
@@ -503,6 +495,11 @@ def _extract_python_env_var_refs(repo: Path) -> set[str]:
     referenced (reads only). Best-effort: missing files / OS errors
     are skipped silently. Untracked files are NOT scanned — the audit
     follows the same `git ls-files` convention as the rest of survey.
+
+    Test files are skipped — fixture string literals like
+    `os.environ.get("FAKE_VAR")` inside test bodies would otherwise
+    surface as harness drift findings (the regex doesn't distinguish
+    Python-IN-string-literal from Python-actually-executed).
     """
     if not is_git_repo(repo):
         return set()
@@ -515,14 +512,120 @@ def _extract_python_env_var_refs(repo: Path) -> set[str]:
     for rel in tracked:
         if not rel.endswith(_ENV_SCANNABLE_EXTENSIONS):
             continue
+        if _is_test_file(rel):
+            continue
         try:
             text = (repo / rel).read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        for pattern in _ENV_PYTHON_PATTERNS:
-            for match in pattern.finditer(text):
-                out.add(match.group(1))
+        out.update(_extract_python_env_names_via_ast(text))
     return out
+
+
+def _extract_python_env_names_via_ast(text: str) -> set[str]:
+    """AST-based extractor. Catches:
+
+    - `os.environ.get("NAME", ...)`
+    - `os.getenv("NAME", ...)`
+    - `os.environ["NAME"]` — only when it's a Load context (a READ).
+      Writes (`os.environ["X"] = ...`) appear as Store-context
+      Subscripts and are correctly skipped.
+
+    Skips:
+
+    - Comments (not in the AST).
+    - Strings (Constant nodes that contain example code — the
+      regex-based pass historically misfired on docstrings).
+    - Syntax-broken files — best-effort; returns an empty set rather
+      than raising so the rest of the audit keeps working.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return set()
+
+    names: set[str] = set()
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            name = _call_targets_environ(node)
+            if name is not None:
+                names.add(name)
+        elif isinstance(node, ast.Subscript):
+            if isinstance(node.ctx, ast.Load) and _subscripts_environ(node):
+                name = _subscript_str_index(node)
+                if name is not None:
+                    names.add(name)
+
+    return names
+
+
+def _call_targets_environ(node: ast.Call) -> str | None:
+    """If `node` is `os.environ.get('NAME', ...)` or `os.getenv('NAME', ...)`,
+    return `NAME`. Else None."""
+    if not node.args:
+        return None
+    arg0 = node.args[0]
+    if not (isinstance(arg0, ast.Constant) and isinstance(arg0.value, str)):
+        return None
+    func = node.func
+    # os.getenv(...)
+    if (
+        isinstance(func, ast.Attribute)
+        and func.attr == "getenv"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "os"
+    ):
+        return arg0.value
+    # os.environ.get(...)
+    if (
+        isinstance(func, ast.Attribute)
+        and func.attr == "get"
+        and isinstance(func.value, ast.Attribute)
+        and func.value.attr == "environ"
+        and isinstance(func.value.value, ast.Name)
+        and func.value.value.id == "os"
+    ):
+        return arg0.value
+    return None
+
+
+def _subscripts_environ(node: ast.Subscript) -> bool:
+    """True iff `node.value` is `os.environ`."""
+    val = node.value
+    return (
+        isinstance(val, ast.Attribute)
+        and val.attr == "environ"
+        and isinstance(val.value, ast.Name)
+        and val.value.id == "os"
+    )
+
+
+def _subscript_str_index(node: ast.Subscript) -> str | None:
+    idx = node.slice
+    if isinstance(idx, ast.Constant) and isinstance(idx.value, str):
+        return idx.value
+    return None
+
+
+def _is_test_file(rel_path: str) -> bool:
+    """True iff the path is part of a test suite — `tests/` directory,
+    `test_*.py` / `*_test.py` filename, or `conftest.py`. Test files
+    contain fixture string literals that the env-var regex can't
+    distinguish from real code, so we drop them from the scan.
+    """
+    p = rel_path.replace("\\", "/")
+    parts = p.split("/")
+    if "tests" in parts or "test" in parts:
+        return True
+    base = parts[-1]
+    if base == "conftest.py":
+        return True
+    if base.startswith("test_") and base.endswith(".py"):
+        return True
+    if base.endswith("_test.py"):
+        return True
+    return False
 
 
 # A README documents an env var if its name appears inside backticks
