@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -40,6 +41,8 @@ Phase 9 (PR creation) — audit is read-only by contract."""
 
 
 def main(argv: list[str] | None = None) -> int:
+    _load_config_env()
+
     parser = _build_parser()
     args = parser.parse_args(argv)
 
@@ -55,6 +58,45 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_batch(args)
     parser.error(f"unknown command: {args.command}")
     return 2  # unreachable; argparse already exits
+
+
+def _load_config_env() -> None:
+    """Auto-source `${XDG_CONFIG_HOME:-~/.config}/repo-doc-gov/env` so
+    operators can stash `OPENROUTER_API_KEY` / `ANTHROPIC_API_KEY` /
+    `GH_TOKEN` in one file with mode 600 instead of exporting per-shell.
+
+    Sibling-tool precedent: `agent-tool-llm-proofreader` ships the same
+    pattern. Already-set env vars win — the file never overrides what
+    the operator (or CI) explicitly exported.
+
+    POSIX: warns to stderr if the file is group/world-readable. The
+    `python-dotenv` dep is already declared in `pyproject.toml`.
+    """
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return  # dotenv missing — best-effort, never block the CLI
+
+    xdg_config = os.environ.get("XDG_CONFIG_HOME")
+    config_dir = Path(xdg_config) if xdg_config else Path.home() / ".config"
+    env_file = config_dir / "repo-doc-gov" / "env"
+    if not env_file.is_file():
+        return
+
+    if os.name == "posix":
+        try:
+            mode = env_file.stat().st_mode
+        except OSError:
+            mode = None
+        if mode is not None and (mode & 0o077):
+            print(
+                f"warning: {env_file} has group/world permissions "
+                f"(mode {oct(mode)[-3:]}); recommend 600. Run "
+                f"`chmod 600 {env_file}`.",
+                file=sys.stderr,
+            )
+
+    load_dotenv(env_file, override=False)
 
 
 def _build_parser() -> argparse.ArgumentParser:
